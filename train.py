@@ -31,8 +31,7 @@ def main(args=None):
 
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument('--epochs', help='Number of epochs', type=int, default=100)
-    parser.add_argument('--checkpoints', help='path of check point', type=str, default=None)
-
+    parser.add_argument('--checkpoints', help='model checkpoints path', type=str)
     parser = parser.parse_args(args)
 
     # Create the data loaders
@@ -46,6 +45,24 @@ def main(args=None):
         dataset_val = CocoDataset(parser.coco_path, set_name='val2017',
                                   transform=transforms.Compose([Normalizer(), Resizer()]))
 
+    elif parser.dataset == 'csv':
+
+        if parser.csv_train is None:
+            raise ValueError('Must provide --csv_train when training on COCO,')
+
+        if parser.csv_classes is None:
+            raise ValueError('Must provide --csv_classes when training on COCO,')
+
+        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
+                                   transform=transforms.Compose([Normalizer(), Augmenter(), Resizer()]))
+
+        if parser.csv_val is None:
+            dataset_val = None
+            print('No validation annotations provided.')
+        else:
+            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
+                                     transform=transforms.Compose([Normalizer(), Resizer()]))
+
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
 
@@ -53,7 +70,7 @@ def main(args=None):
     dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
 
     if dataset_val is not None:
-        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=2, drop_last=False)
+        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=1, drop_last=False)
         dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
 
     # Create the model
@@ -70,8 +87,9 @@ def main(args=None):
     else:
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
+
     use_gpu = True
-    # retinanet = torch.load(parser.checkpoints)
+    retinanet = torch.load(parser.checkpoints)
 
     if use_gpu:
         if torch.cuda.is_available():
@@ -89,13 +107,6 @@ def main(args=None):
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
 
     loss_hist = collections.deque(maxlen=500)
-
-    #
-    # if parser.checkpoints:
-    #     checkpoint_ = torch.load(parser.checkpoints)
-    #     retinanet.load_state_dict(checkpoint_['model_state_dict'])
-    #     optimizer.load_state_dict(checkpoint_['optimizer_state_dict'])
-    #     print('checkpoint load complete!!')
 
     retinanet.train()
     retinanet.module.freeze_bn()
@@ -145,25 +156,25 @@ def main(args=None):
             except Exception as e:
                 print(e)
                 continue
-        if epoch_num % 5 ==0 and epoch_num > 0:
-            if parser.dataset == 'coco':
 
-                print('Evaluating dataset')
-                coco_eval.evaluate_coco(dataset_val, retinanet)
+        if parser.dataset == 'coco':
 
-            elif parser.dataset == 'csv' and parser.csv_val is not None:
-                print('Evaluating dataset')
-                mAP = csv_eval.evaluate(dataset_val, retinanet)
+            print('Evaluating dataset')
+
+            coco_eval.evaluate_coco(dataset_val, retinanet)
+
+        elif parser.dataset == 'csv' and parser.csv_val is not None:
+
+            print('Evaluating dataset')
+
+            mAP = csv_eval.evaluate(dataset_val, retinanet)
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, 'weights/att_fusion_{}.pt'.format(epoch_num))
-        # torch.save({
-        #     'model_state_dict': retinanet.state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict(),
-        #     'loss': loss,
-        # }, '{}_GCN_retinanet_{}.pt'.format(parser.dataset, epoch_num))
+        torch.save(retinanet.module, '{}_retinanet_{}.pt'.format(parser.dataset, epoch_num))
+
     retinanet.eval()
+
     torch.save(retinanet, 'model_final.pt')
 
 

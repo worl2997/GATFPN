@@ -3,14 +3,9 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, GFPN_conv, FUB
-from retinanet.utils import BBoxTransform, ClipBoxes
+from retinanet.utils import BasicBlock, Bottleneck, BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
-import torch.nn.functional as F
-import torch.nn as nn
-
-
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -21,116 +16,56 @@ model_urls = {
 }
 
 
+class PyramidFeatures(nn.Module):
+    def __init__(self, C3_size, C4_size, C5_size, feature_size=256):
+        super(PyramidFeatures, self).__init__()
 
-class Nodefeats_make(nn.Module):
-    def __init__(self, fpn_channels):
-        super(Nodefeats_make, self).__init__()
-        self.fpn_c = fpn_channels # [256, 512, 1024, 2048] # 레벨별 채널 수
-        self.num_backbone_feats = len(self.fpn_c)
-        self.target_size = 256
+        # upsample C5 to get P5 from the FPN paper
+        self.P5_1 = nn.Conv2d(C5_size, feature_size, kernel_size=1, stride=1, padding=0)
+        self.P5_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
+        self.P5_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
 
-        self.make_C5_ = self.make_C5(self.fpn_c[-1],self.target_size) # C4 -> C5
-        self.make_C6_ = nn.Conv2d(self.target_size, self.target_size,kernel_size=3, stride=2, padding=1) # C5 -> C6
-        self.make_C1 = nn.Conv2d(in_channels=self.fpn_c[0], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C2 = nn.Conv2d(in_channels=self.fpn_c[1], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C3 = nn.Conv2d(in_channels=self.fpn_c[2], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C4 = nn.Conv2d(in_channels=self.fpn_c[3], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
+        # add P5 elementwise to C4
+        self.P4_1 = nn.Conv2d(C4_size, feature_size, kernel_size=1, stride=1, padding=0)
+        self.P4_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
+        self.P4_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
 
-    def make_C5(self,in_ch, out_ch):
-        stage = nn.Sequential()
-        stage.add_module('conv1', nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, stride=1, padding=0))# 1x1 channel resize
-        stage.add_module('conv2', nn.Conv2d(out_ch, out_ch,kernel_size=3, stride=2 , padding=1))  # 3x3 conv 2 stride
-        return stage
+        # add P4 elementwise to C3
+        self.P3_1 = nn.Conv2d(C3_size, feature_size, kernel_size=1, stride=1, padding=0)
+        self.P3_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
 
+        # "P6 is obtained via a 3x3 stride-2 conv on C5"
+        self.P6 = nn.Conv2d(C5_size, feature_size, kernel_size=3, stride=2, padding=1)
 
-    def forward(self, inputs):
-        C1, C2, C3, C4 = inputs
-        # C1 ~ C6 : original feature
-        C5 = self.make_C5_(C4)
-        C6 = self.make_C6_(C5)
-        #C1 = self.make_C1(C1)
-        C2 = self.make_C2(C2)
-        C3 = self.make_C3(C3)
-        C4 = self.make_C4(C4)
-
-        return [C2,C3,C4,C5,C6]
-       #  채널사이즈만 256으로 모두 맞춰줌
-
-# 256 채널에
-# origin feature와 updated feature를 기반으로 prediction head로 넘길 피쳐를 생성하는 부분
-# 그래프 노드 -> 5개
-# fmap_size 계산 : 256 채널, 42x 25
-
-# 백본으로 부터 추출된 feature map을 기반으로 그래프의 입력으로 들어갈
-# node_feature h 와 edge feature를 생성해 주는 부분
-class Graph_feat_fusion(nn.Module):
-    def __init__(self, channel_size, activation, dropout, num_node):
-        super(Graph_feat_fusion, self).__init__()
-        # channel_size => 통합된 feature map의 채널 사이즈를 넘겨주면 될듯
-        self.activation = activation
-        self.reduc_ratio = 4
-        self.FUB_layer = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
-        self.GFPN_conv = GFPN_conv(channel_size, activation)  # forward input -> updated feature, origin_feature
-
-    def forward(self, features):
-        origin = features
-        updated_1 = self.FUB_layer(features)
-        updated_feat1 = self.GFPN_conv(origin, updated_1)
-        # updated_2 = self.FUB_layer(updated_feat1)
-        # updated_feat2 = self.GFPN_conv(origin, updated_2)
-        return updated_feat1 # [c1,c2,c3,c4,c5]
-
-
-class GCN_FPN(nn.Module):
-    def __init__(self,
-                 in_channels,  # 256
-                 num_levels,  # 5
-                 refine_level=2,  # 어떤 레벨을 기준으로 refine 할건지..?
-                 conv_cfg=None,
-                 norm_cfg=None):
-        super(GCN_FPN, self).__init__()
-
-        self.in_channels = in_channels
-        self.num_levels = num_levels
-        self.conv_cfg = conv_cfg
-        self.norm_cfg = norm_cfg
-        self.refine_level = refine_level
-        assert 0 <= self.refine_level < self.num_levels
-        self.refine = Graph_feat_fusion(self.in_channels, nn.LeakyReLU, 0.6, self.num_levels)
-
+        # "P7 is computed by applying ReLU followed by a 3x3 stride-2 conv on P6"
+        self.P7_1 = nn.ReLU()
+        self.P7_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=2, padding=1)
 
     def forward(self, inputs):
-        # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
-        feats = []
-        gather_size = inputs[self.refine_level].size()[2:]  # (뒤에 hxw 사이즈 반납)
-        # 피쳐들의 사이즈를 특정 기준으로 모두 통일
-        for i in range(self.num_levels):
-            if i < self.refine_level:
-                gathered = F.adaptive_max_pool2d(inputs[i], output_size=gather_size)
-            else:
+        C3, C4, C5 = inputs
 
-                #gathered = nn.Upsample(inputs[i], size=tuple(gather_size), mode='nearest')
-                gathered = F.interpolate(inputs[i], size=gather_size, mode='nearest') # 이부분 업샘플링으로 바꾸기
-            feats.append(gathered)
+        P5_x = self.P5_1(C5)
+        P5_upsampled_x = self.P5_upsampled(P5_x)
+        P5_x = self.P5_2(P5_x)
+
+        P4_x = self.P4_1(C4)
+        P4_x = P5_upsampled_x + P4_x
+        P4_upsampled_x = self.P4_upsampled(P4_x)
+        P4_x = self.P4_2(P4_x)
+
+        P3_x = self.P3_1(C3)
+        P3_x = P3_x + P4_upsampled_x
+        P3_x = self.P3_2(P3_x)
+
+        P6_x = self.P6(C5)
+
+        P7_x = self.P7_1(P6_x)
+        P7_x = self.P7_2(P7_x)
+
+        return [P3_x, P4_x, P5_x, P6_x, P7_x]
 
 
-        if self.refine is not None:
-            enhanced_feat = self.refine(feats)  # input : Gather feature
-
-        # step 3 :scatter refined features to multi-levels by a residual path
-        outs = []
-        for i in range(self.num_levels):
-            out_size = inputs[i].size()[2:]  # 해당하는 원래 original size
-            if i < self.refine_level:
-                # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
-                #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
-                residual = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
-            else:
-                residual = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
-            outs.append(residual + inputs[i])
-        return outs
-
-class RegressionModel(nn.Module): #들어오는 feature 수를 교정해 주어야함
+class RegressionModel(nn.Module):
     def __init__(self, num_features_in, num_anchors=9, feature_size=256):
         super(RegressionModel, self).__init__()
 
@@ -218,37 +153,31 @@ class ClassificationModel(nn.Module):
 
 
 class ResNet(nn.Module):
-        # layers -> 각각 layer를 몇번 반복사는지 알려줌
-        #  ResNet(num_classes, BasicBlock, [2, 2, 2, 2], **kwargs)
-    def __init__(self, num_classes, block, layers):
-        self.node_channel_size = 256 # 일단 임의로 이렇게 지정
 
+    def __init__(self, num_classes, block, layers):
         self.inplanes = 64
         super(ResNet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False) #
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
-
-
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])  # C1 -> output_size 56x56 (이미지 사이즈에 따라서 다름)
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2) #C2 -> output_size 28x28
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2) #C3 -> 14x14
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2) #C4 -> 7x7
+        self.layer1 = self._make_layer(block, 64, layers[0])
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
 
         if block == BasicBlock:
-            fpn_channel_sizes = [self.layer1[layers[0] - 1].conv2.out_channels , self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
+            fpn_sizes = [self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
                          self.layer4[layers[3] - 1].conv2.out_channels]
         elif block == Bottleneck:
-            fpn_channel_sizes = [self.layer1[layers[0] - 1].conv3.out_channels, self.layer2[layers[1] - 1].conv3.out_channels, self.layer3[layers[2] - 1].conv3.out_channels,
+            fpn_sizes = [self.layer2[layers[1] - 1].conv3.out_channels, self.layer3[layers[2] - 1].conv3.out_channels,
                          self.layer4[layers[3] - 1].conv3.out_channels]
         else:
             raise ValueError(f"Block type {block} not understood")
 
-        self.Node_feats = Nodefeats_make(fpn_channel_sizes)
-        self.GCN_FPN = GCN_FPN(256,5,2) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
+        self.fpn = PyramidFeatures(fpn_sizes[0], fpn_sizes[1], fpn_sizes[2])
 
-        self.regressionModel = RegressionModel(256) # 256 차원이라..
+        self.regressionModel = RegressionModel(256)
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
 
         self.anchors = Anchors()
@@ -290,9 +219,8 @@ class ResNet(nn.Module):
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
             layers.append(block(self.inplanes, planes))
-        # 마지막 블록의 conv2 의 out channel을 따로 뽑아낼 수 있음
-        return nn.Sequential(*layers)
 
+        return nn.Sequential(*layers)
 
     def freeze_bn(self):
         '''Freeze BatchNorm layers.'''
@@ -316,20 +244,17 @@ class ResNet(nn.Module):
         x2 = self.layer2(x1)
         x3 = self.layer3(x2)
         x4 = self.layer4(x3)
-        # 이부분을 짜야함
-        # 구현이 어려운 이유가 backbone, neck, head가 모두 한부분으로 연결되어있음
-        Node_features = self.Node_feats([x1, x2, x3, x4]) # FPN으로 부터 feature 추출 -> 나중에 이거 기반으로 컨트롤좀 해보기
-        enhanced_feat = self.GCN_FPN(Node_features)
 
-        regression = torch.cat([self.regressionModel(feature) for feature in enhanced_feat], dim=1)
+        features = self.fpn([x2, x3, x4])
 
-        classification = torch.cat([self.classificationModel(feature) for feature in enhanced_feat], dim=1)
+        regression = torch.cat([self.regressionModel(feature) for feature in features], dim=1)
+
+        classification = torch.cat([self.classificationModel(feature) for feature in features], dim=1)
+
         anchors = self.anchors(img_batch)
 
-
-
         if self.training:
-            return self.focalLoss(classification, regression,anchors, annotations)
+            return self.focalLoss(classification, regression, anchors, annotations)
         else:
             transformed_anchors = self.regressBoxes(anchors, regression)
             transformed_anchors = self.clipBoxes(transformed_anchors, img_batch)
@@ -426,5 +351,3 @@ def resnet152(num_classes, pretrained=False, **kwargs):
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152'], model_dir='.'), strict=False)
     return model
-
-
