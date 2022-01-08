@@ -89,7 +89,7 @@ def main(args=None):
 
 
     use_gpu = True
-    retinanet = torch.load(parser.checkpoints)
+    # retinanet = torch.load(parser.checkpoints)
 
     if use_gpu:
         if torch.cuda.is_available():
