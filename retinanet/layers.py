@@ -53,8 +53,8 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        out = x * wei
-        output = out.reshape(1, -1)
+        # out = x * wei
+        output = wei.reshape(1, -1)
 
         return output
 
@@ -77,7 +77,7 @@ class FUB(nn.Module):
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                if i >= j:
+                if i > j:
                     pass
                 else:
                     att_score = self.make_score(node_i + node_j)
@@ -125,9 +125,8 @@ class FUB(nn.Module):
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge, '1', 0.3).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(edge, '1', 0.35).to(torch.cuda.current_device())
         #         edge_list = edge_matrix  # .to(torch.cuda.current_device())
-
 
         h = self.feat_fusion(normalized_edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
