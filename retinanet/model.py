@@ -110,7 +110,7 @@ class GCN_FPN(nn.Module):
             else:
 
                 #gathered = nn.Upsample(inputs[i], size=tuple(gather_size), mode='nearest')
-                gathered = F.interpolate(inputs[i], size=gather_size, mode='bilnear') # 이부분 업샘플링으로 바꾸기
+                gathered = F.interpolate(inputs[i], size=gather_size, mode='nearest') # 이부분 업샘플링으로 바꾸기
             feats.append(gathered)
 
 
@@ -119,14 +119,17 @@ class GCN_FPN(nn.Module):
 
         # step 3 :scatter refined features to multi-levels by a residual path
         outs = []
+        feat_size = []
         for i in range(self.num_levels):
             out_size = inputs[i].size()[2:]  # 해당하는 원래 original size
+
             if i < self.refine_level:
                 # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
                 #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
-                residual = F.interpolate(enhanced_feat[i], size=out_size, mode='bilinear')
+                residual = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
             else:
                 residual = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
+            print(residual.size())
             outs.append(residual + inputs[i])
         return outs
 
