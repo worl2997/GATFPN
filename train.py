@@ -53,7 +53,7 @@ def main(args=None):
     dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
 
     if dataset_val is not None:
-        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=2, drop_last=False)
+        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=6, drop_last=False)
         dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
 
     # Create the model
@@ -145,7 +145,7 @@ def main(args=None):
             except Exception as e:
                 print(e)
                 continue
-        if epoch_num % 5 ==0 and epoch_num > 0:
+        if epoch_num % 1 ==0: # and epoch_num > 0:
             if parser.dataset == 'coco':
 
                 print('Evaluating dataset')
@@ -157,7 +157,7 @@ def main(args=None):
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, 'weights/att_fusion_{}.pt'.format(epoch_num))
+        torch.save(retinanet.module, 'weights/att_fusion_adver{}.pt'.format(epoch_num))
         # torch.save({
         #     'model_state_dict': retinanet.state_dict(),
         #     'optimizer_state_dict': optimizer.state_dict(),

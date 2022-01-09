@@ -5,6 +5,7 @@ import numpy as np
 from sklearn import preprocessing
 from retinanet.utils import total_pixel_size
 
+
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -52,16 +53,15 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
+        # out = x * wei
         output = wei.reshape(1, -1)
-
 
         return output
 
+# # node_feauter은 forward의 input으로 들어감
+# GCN 기반으로 이미지 feature map을 업데이트 하는 부분
+# # node_feauter은 forward의 input으로 들어감
 
-# GCN 기반으로 이미지 feature map을 업데이트 하는 부분
-# # node_feauter은 forward의 input으로 들어감
-# GCN 기반으로 이미지 feature map을 업데이트 하는 부분
-# # node_feauter은 forward의 input으로 들어감
 class FUB(nn.Module):
     def __init__(self, channels, r, activation, dropout, node_size):
         super(FUB, self).__init__()
@@ -70,8 +70,6 @@ class FUB(nn.Module):
         self.node_num = node_size
         self.activation = activation
         self.make_score = MS_CAM(channels, r)
-        self.EdgeWeight = nn.Parameter(torch.Tensor(self.node_num, self.node_num))
-
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
@@ -79,13 +77,13 @@ class FUB(nn.Module):
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                if i >= j:
+                if i > j:
                     pass
                 else:
                     att_score = self.make_score(node_i + node_j)
                     edge_list[:,i,j] = att_score
-                    edge_list[:,j,i] = 1-att_score
-        print(edge_list[0])
+                    edge_list[:,j,i] = att_score
+
         return edge_list
 
     # graph 와 node feature matrix 반환
@@ -100,25 +98,13 @@ class FUB(nn.Module):
         node_feature_matirx = node_feat.unsqueeze(-1)
         return node_feature_matirx
 
-# perform L2-normalization on each row
-    def normalize_edge(self, input, type, thresh_h):
-        mx = input.detach().numpy()
-        row = len(mx)
-        X_normalized = preprocessing.normalize(mx, norm=type)
-        X_normalized[np.isinf(X_normalized)] = 0.
+    def normalize_edge(self, input, type, t):
+        k = torch.zeros(size=input.size())
+        out = torch.where(input > t, input, k)
+        #out = F.normalize(out, p=type, dim=2)
 
-        for i, j in enumerate(X_normalized):
-            for k, num in enumerate(j):
-                if num < thresh_h:
-                    X_normalized[i][k] = 0
-        # self loop가 없었다고 가정하고 넣어줌
-        self_loop = torch.zeros(row, row)
-        for i in range(row):
-            for j in range(row):
-                if i == j:
-                    self_loop[i][j] = 1
+        return out
 
-        return torch.Tensor(X_normalized) + self_loop
 
     def feat_fusion(self, edge, node):
         h = edge.matmul(node)
@@ -134,16 +120,15 @@ class FUB(nn.Module):
         node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
         pixels = total_pixel_size(node_feats[0])
         edge_matrix = self.make_edge_matirx(node_feats,pixels)
-        edge = edge_matrix.to(torch.cuda.current_device())
+        edge = edge_matrix#.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        # normalized_edge = self.normalize_edge(edge_list, 'l2', 0.3).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(edge, '1', 0.35).to(torch.cuda.current_device())
         #         edge_list = edge_matrix  # .to(torch.cuda.current_device())
 
-
-        h = self.feat_fusion(edge, node_feats_matrix)
+        h = self.feat_fusion(normalized_edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
         return out
 

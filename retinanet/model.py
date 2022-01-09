@@ -119,16 +119,21 @@ class GCN_FPN(nn.Module):
 
         # step 3 :scatter refined features to multi-levels by a residual path
         outs = []
+        feat_size = []
         for i in range(self.num_levels):
             out_size = inputs[i].size()[2:]  # 해당하는 원래 original size
+
             if i < self.refine_level:
                 # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
                 #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
                 residual = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
             else:
                 residual = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
+            print(residual.size())
             outs.append(residual + inputs[i])
         return outs
+
+
 
 class RegressionModel(nn.Module): #들어오는 feature 수를 교정해 주어야함
     def __init__(self, num_features_in, num_anchors=9, feature_size=256):
