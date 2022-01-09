@@ -108,9 +108,8 @@ class GCN_FPN(nn.Module):
             if i < self.refine_level:
                 gathered = F.adaptive_max_pool2d(inputs[i], output_size=gather_size)
             else:
-
                 #gathered = nn.Upsample(inputs[i], size=tuple(gather_size), mode='nearest')
-                gathered = F.interpolate(inputs[i], size=gather_size, mode='nearest') # 이부분 업샘플링으로 바꾸기
+                gathered = F.interpolate(inputs[i], size=gather_size, mode='nearest')
             feats.append(gathered)
 
 
