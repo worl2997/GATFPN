@@ -3,7 +3,7 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, GFPN_conv, FUB
+from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB
 from retinanet.utils import BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
@@ -69,13 +69,13 @@ class Graph_feat_fusion(nn.Module):
         # channel_size => 통합된 feature map의 채널 사이즈를 넘겨주면 될듯
         self.activation = activation
         self.reduc_ratio = 4
-        self.FUB_layer = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
-        self.GFPN_conv = GFPN_conv(channel_size, activation)  # forward input -> updated feature, origin_feature
+        self.FUB = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
+        self.RFC = RFC(channel_size)  # forward input -> updated feature, origin_feature
 
     def forward(self, features):
         origin = features
-        updated_1 = self.FUB_layer(features)
-        updated_feat1 = self.GFPN_conv(origin, updated_1)
+        updated_1 = self.FUB(features)
+        updated_feat1 = self.RFC(origin, updated_1)
         # updated_2 = self.FUB_layer(updated_feat1)
         # updated_feat2 = self.GFPN_conv(origin, updated_2)
         return updated_feat1 # [c1,c2,c3,c4,c5]
@@ -129,7 +129,7 @@ class GCN_FPN(nn.Module):
                 residual = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
             else:
                 residual = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
-            print(residual.size())
+            # print(residual.size())
             outs.append(residual + inputs[i])
         return outs
 

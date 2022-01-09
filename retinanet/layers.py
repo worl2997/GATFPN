@@ -125,7 +125,7 @@ class FUB(nn.Module):
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge, '1', 0.35).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(edge, '1', 0.3).to(torch.cuda.current_device())
         #         edge_list = edge_matrix  # .to(torch.cuda.current_device())
 
         h = self.feat_fusion(normalized_edge, node_feats_matrix)
@@ -133,21 +133,22 @@ class FUB(nn.Module):
         return out
 
 
-class GFPN_conv(nn.Module):
-    def __init__(self, feat_size, activation):
-        super(GFPN_conv, self).__init__()
-        self.activation = activation
-        self.conv_1 = nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0)
-        self.conv = conv3x3(feat_size, feat_size, stride=1)
-        self.bn = nn.BatchNorm2d(feat_size)
+class RFC(nn.Module):
+    def __init__(self, feat_size):
+        super(RFC, self).__init__()
+
+        self.rfc  = nn.Sequential(
+            nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0,bias=False),
+            nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(feat_size),
+            nn.ReLU(inplace=True),
+        )
 
     def forward(self, origin, h):
         result_feat = []
         for origin_feat, updated_feat in zip(origin, h):
             feat = torch.cat([origin_feat, updated_feat], dim=1)
-            out = self.conv_1(feat)
-            out = self.conv(out)
-            out = self.bn(out)
+            out = self.rfc(feat)
             result_feat.append(out)
         return result_feat
 
