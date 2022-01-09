@@ -68,7 +68,7 @@ class Graph_feat_fusion(nn.Module):
         super(Graph_feat_fusion, self).__init__()
         # channel_size => 통합된 feature map의 채널 사이즈를 넘겨주면 될듯
         self.activation = activation
-        self.reduc_ratio = 4
+        self.reduc_ratio = 2
         self.FUB = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
         self.RFC = RFC(channel_size)  # forward input -> updated feature, origin_feature
 

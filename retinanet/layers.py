@@ -25,7 +25,7 @@ class conv1x1(nn.Module):
 
 class MS_CAM(nn.Module):
 
-    def __init__(self, channels=64, r=4):
+    def __init__(self, channels=64, r=2):
         super(MS_CAM, self).__init__()
         inter_channels = int(channels // r)
 
@@ -125,7 +125,7 @@ class FUB(nn.Module):
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge, '1', 0.3).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(edge, '1', 0.35).to(torch.cuda.current_device())
         #         edge_list = edge_matrix  # .to(torch.cuda.current_device())
 
         h = self.feat_fusion(normalized_edge, node_feats_matrix)
