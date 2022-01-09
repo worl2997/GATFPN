@@ -52,8 +52,7 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        out = x * wei
-        output = out.reshape(1, -1)
+        output = wei.reshape(1, -1)
 
 
         return output
@@ -71,6 +70,7 @@ class FUB(nn.Module):
         self.node_num = node_size
         self.activation = activation
         self.make_score = MS_CAM(channels, r)
+        self.EdgeWeight = nn.Parameter(torch.Tensor(self.node_num, self.node_num))
 
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
@@ -84,8 +84,8 @@ class FUB(nn.Module):
                 else:
                     att_score = self.make_score(node_i + node_j)
                     edge_list[:,i,j] = att_score
-                    edge_list[:,j,i] = att_score
-
+                    edge_list[:,j,i] = 1-att_score
+        print(edge_list[0])
         return edge_list
 
     # graph 와 node feature matrix 반환
@@ -100,6 +100,7 @@ class FUB(nn.Module):
         node_feature_matirx = node_feat.unsqueeze(-1)
         return node_feature_matirx
 
+# perform L2-normalization on each row
     def normalize_edge(self, input, type, thresh_h):
         mx = input.detach().numpy()
         row = len(mx)
