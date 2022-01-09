@@ -63,22 +63,19 @@ class Nodefeats_make(nn.Module):
 
 # 백본으로 부터 추출된 feature map을 기반으로 그래프의 입력으로 들어갈
 # node_feature h 와 edge feature를 생성해 주는 부분
-class Graph_feat_fusion(nn.Module):
-    def __init__(self, channel_size, activation, dropout, num_node):
-        super(Graph_feat_fusion, self).__init__()
-        # channel_size => 통합된 feature map의 채널 사이즈를 넘겨주면 될듯
-        self.activation = activation
-        self.reduc_ratio = 2
-        self.FUB = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
-        self.RFC = RFC(channel_size)  # forward input -> updated feature, origin_feature
-
-    def forward(self, features):
-        origin = features
-        updated_1 = self.FUB(features)
-        updated_feat1 = self.RFC(origin, updated_1)
-        # updated_2 = self.FUB_layer(updated_feat1)
-        # updated_feat2 = self.GFPN_conv(origin, updated_2)
-        return updated_feat1 # [c1,c2,c3,c4,c5]
+# class Graph_feat_fusion(nn.Module):
+#     def __init__(self, channel_size, activation, dropout, num_node):
+#         super(Graph_feat_fusion, self).__init__()
+#         # channel_size => 통합된 feature map의 채널 사이즈를 넘겨주면 될듯
+#         self.activation = activation
+#         self.reduc_ratio = 2
+#         self.FUB = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
+#         self.RFC = RFC(channel_size)  # forward input -> updated feature, origin_feature
+#
+#     def forward(self, features):
+#         origin = features
+#         updated_1 = self.FUB(features)
+#         return updated_feat1 # [c1,c2,c3,c4,c5]
 
 
 class GCN_FPN(nn.Module):
@@ -95,8 +92,11 @@ class GCN_FPN(nn.Module):
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
         self.refine_level = refine_level
+        self.r = 2
         assert 0 <= self.refine_level < self.num_levels
-        self.refine = Graph_feat_fusion(self.in_channels, nn.LeakyReLU, 0.6, self.num_levels)
+        self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
+        self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
+        #Graph_feat_fusion(self.in_channels, nn.LeakyReLU, 0.6, self.num_levels)
 
 
     def forward(self, inputs):
@@ -118,19 +118,22 @@ class GCN_FPN(nn.Module):
 
         # step 3 :scatter refined features to multi-levels by a residual path
         outs = []
-        feat_size = []
         for i in range(self.num_levels):
             out_size = inputs[i].size()[2:]  # 해당하는 원래 original size
 
             if i < self.refine_level:
                 # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
                 #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
-                residual = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
+                resized_back_feats = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
             else:
-                residual = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
+                resized_back_feats = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
             # print(residual.size())
-            outs.append(residual + inputs[i])
-        return outs
+            outs.append(resized_back_feats)
+
+        updated_feature = self.RFC(inputs, outs)
+
+
+        return updated_feature
 
 
 

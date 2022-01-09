@@ -63,12 +63,10 @@ class MS_CAM(nn.Module):
 # # node_feauter은 forward의 input으로 들어감
 
 class FUB(nn.Module):
-    def __init__(self, channels, r, activation, dropout, node_size):
+    def __init__(self, channels, r, node_size):
         super(FUB, self).__init__()
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
-        self.dropout = nn.Dropout(p=dropout)
         self.node_num = node_size
-        self.activation = activation
         self.make_score = MS_CAM(channels, r)
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
@@ -100,14 +98,7 @@ class FUB(nn.Module):
 
     def normalize_edge(self, input, type, t):
         k = torch.zeros(size=input.size())
-        # 원래 코드
         out = torch.where(input > t, input, k)
-        #out = F.normalize(out, p=type, dim=2)
-
-        # # 순서를 바꾼코드
-        # out = F.normalize(input, p=type, dim=2)
-        # out = torch.where(out > t, out, k)
-
         return out
 
 
@@ -153,6 +144,7 @@ class RFC(nn.Module):
             feat = torch.cat([origin_feat, updated_feat], dim=1)
             out = self.rfc(feat)
             result_feat.append(out)
+
         return result_feat
 
 
