@@ -63,20 +63,6 @@ class Nodefeats_make(nn.Module):
 
 # 백본으로 부터 추출된 feature map을 기반으로 그래프의 입력으로 들어갈
 # node_feature h 와 edge feature를 생성해 주는 부분
-# class Graph_feat_fusion(nn.Module):
-#     def __init__(self, channel_size, activation, dropout, num_node):
-#         super(Graph_feat_fusion, self).__init__()
-#         # channel_size => 통합된 feature map의 채널 사이즈를 넘겨주면 될듯
-#         self.activation = activation
-#         self.reduc_ratio = 2
-#         self.FUB = FUB(channel_size, self.reduc_ratio, activation, dropout, num_node)  # forward input -> resize node list
-#         self.RFC = RFC(channel_size)  # forward input -> updated feature, origin_feature
-#
-#     def forward(self, features):
-#         origin = features
-#         updated_1 = self.FUB(features)
-#         return updated_feat1 # [c1,c2,c3,c4,c5]
-
 
 class GCN_FPN(nn.Module):
     def __init__(self,
@@ -96,8 +82,6 @@ class GCN_FPN(nn.Module):
         assert 0 <= self.refine_level < self.num_levels
         self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
         self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
-        #Graph_feat_fusion(self.in_channels, nn.LeakyReLU, 0.6, self.num_levels)
-
 
     def forward(self, inputs):
         # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
