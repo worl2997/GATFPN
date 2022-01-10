@@ -87,7 +87,7 @@ class FUB(nn.Module):
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                att_score = self.make_score(node_i,node_j)
+                att_score = self.make_score(node_i,node_j,256)
                 edge_list[:,i,j] = att_score
 
 
@@ -113,9 +113,8 @@ class FUB(nn.Module):
         return out_
 
 
-    def feat_fusion(self, edge, node,weight):
-        node_ = node*weight
-        h = edge.matmul(node_)
+    def feat_fusion(self, edge, node):
+        h = edge.matmul(node)
         result = h.squeeze(-1)
         out = result.T
         return out
@@ -131,10 +130,11 @@ class FUB(nn.Module):
         edge = edge_matrix#.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
-
+        w = self.w.to(torch.cuda.current_device())
+        node = node_feats_matrix * w
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
         normalized_edge = self.normalize_edge(edge, 2, 0.35).to(torch.cuda.current_device())
-        h = self.feat_fusion(normalized_edge, node_feats_matrix, self.w)
+        h = self.feat_fusion(normalized_edge, node, w)
         out = self.resize_back(node_feats[0].shape,h)
         return out
 
