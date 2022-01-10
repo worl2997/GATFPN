@@ -70,7 +70,7 @@ def main(args=None):
     dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
 
     if dataset_val is not None:
-        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=2, drop_last=False)
+        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=6, drop_last=False)
         dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
 
     # Create the model
