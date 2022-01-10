@@ -69,14 +69,16 @@ class FUB(nn.Module):
         self.node_num = node_size
        # self.make_score = MS_CAM(channels, r)
         self.w = nn.Parameter(torch.Tensor(5, 1))
+        self.conv1x1 = conv1x1(2 * 256, 256)
+
 
     def make_score(self,x1,x2, in_feats):
         x_add = x1 + x2  # elementwise add
         c_cat = torch.cat([x2, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
-        convolution = conv1x1(2 * in_feats, in_feats)
-        target = convolution(c_cat)
+        target = self.conv1x1(c_cat)
         distance = ((x2 - target).abs())
         output = distance.reshape(1,-1)
+
         # distance가 이게 맞나?
         # 현재 이 distance가 과연 스칼라 값일까
         return output
@@ -84,12 +86,11 @@ class FUB(nn.Module):
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
-        edge_list = torch.zeros(pixels, self.node_num, self.node_num)
+        edge_list = torch.zeros(pixels, self.node_num, self.node_num).to(torch.cuda.current_device())
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
                 att_score = self.make_score(node_i,node_j,256)
                 edge_list[:,i,j] = att_score
-
 
         return edge_list
 
@@ -107,13 +108,15 @@ class FUB(nn.Module):
 
     def normalize_edge(self, input, type, t):
         # normalize -> pruning
-        k = torch.zeros(size=input.size())
+        k = torch.zeros(size=input.size()).to(torch.cuda.current_device())
         out = F.normalize(input, p=type, dim=2)
         out_ = torch.where(out > t, input, k)
+
         return out_
 
 
-    def feat_fusion(self, edge, node):
+    def feat_fusion(self, edge, node,weight):
+
         h = edge.matmul(node)
         result = h.squeeze(-1)
         out = result.T
@@ -127,14 +130,13 @@ class FUB(nn.Module):
         node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
         pixels = total_pixel_size(node_feats[0])
         edge_matrix = self.make_edge_matirx(node_feats,pixels)
-        edge = edge_matrix#.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
-        w = self.w.to(torch.cuda.current_device())
-        node = node_feats_matrix * w
+
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge, 2, 0.35).to(torch.cuda.current_device())
-        h = self.feat_fusion(normalized_edge, node, w)
+        normalized_edge = self.normalize_edge(edge_matrix, 2, 0.35).to(torch.cuda.current_device())
+
+        h = self.feat_fusion(normalized_edge, node_feats_matrix, self.w)
         out = self.resize_back(node_feats[0].shape,h)
         return out
 
