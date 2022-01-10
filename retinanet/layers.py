@@ -68,6 +68,7 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
         self.make_score = MS_CAM(channels, r)
+        # self.w =  nn.Parameter(torch.Tensor(1, 1))
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):

@@ -19,7 +19,7 @@ def main(args=None):
 
     parser = parser.parse_args(args)
 
-    dataset_val = CocoDataset(parser.coco_path, set_name='val2017',
+    dataset_val = CocoDataset(parser.coco_path, set_name='test2017',
                               transform=transforms.Compose([Normalizer(), Resizer()]))
 
     # Create the model
