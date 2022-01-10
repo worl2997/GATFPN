@@ -68,7 +68,7 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
         self.make_score = MS_CAM(channels, r)
-        # self.w =  nn.Parameter(torch.Tensor(1, 1))
+        self.w =  nn.Parameter(torch.Tensor(1, 1))
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
@@ -103,9 +103,10 @@ class FUB(nn.Module):
         return out
 
 
-    def feat_fusion(self, edge, node):
+    def feat_fusion(self, edge, node,weight):
         h = edge.matmul(node)
-        result = h.squeeze(-1)
+        h_= h.matmul(weight)
+        result = h_.squeeze(-1)
         out = result.T
         return out
 
@@ -123,7 +124,7 @@ class FUB(nn.Module):
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
         normalized_edge = self.normalize_edge(edge, 2, 0.35).to(torch.cuda.current_device())
-        h = self.feat_fusion(normalized_edge, node_feats_matrix)
+        h = self.feat_fusion(normalized_edge, node_feats_matrix, self.w)
         out = self.resize_back(node_feats[0].shape,h)
         return out
 
