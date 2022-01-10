@@ -67,8 +67,19 @@ class FUB(nn.Module):
         super(FUB, self).__init__()
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
-        self.make_score = MS_CAM(channels, r)
-        self.w =  nn.Parameter(torch.Tensor(1, 1))
+       # self.make_score = MS_CAM(channels, r)
+        self.w = nn.Parameter(torch.Tensor(5, 1))
+
+    def make_score(self,x1,x2, in_feats):
+        x_add = x1 + x2  # elementwise add
+        c_cat = torch.cat([x2, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
+        convolution = conv1x1(2 * in_feats, in_feats)
+        target = convolution(c_cat)
+        distance = ((x2 - target).abs())
+        output = distance.reshape(1,-1)
+        # distance가 이게 맞나?
+        # 현재 이 distance가 과연 스칼라 값일까
+        return output
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
@@ -76,12 +87,9 @@ class FUB(nn.Module):
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                if i > j:
-                    pass
-                else:
-                    att_score = self.make_score(node_i + node_j)
-                    edge_list[:,i,j] = att_score
-                    edge_list[:,j,i] = att_score
+                att_score = self.make_score(node_i,node_j)
+                edge_list[:,i,j] = att_score
+
 
         return edge_list
 
@@ -98,15 +106,17 @@ class FUB(nn.Module):
         return node_feature_matirx
 
     def normalize_edge(self, input, type, t):
+        # normalize -> pruning
         k = torch.zeros(size=input.size())
-        out = torch.where(input > t, input, k)
-        return out
+        out = F.normalize(input, p=type, dim=2)
+        out_ = torch.where(out > t, input, k)
+        return out_
 
 
     def feat_fusion(self, edge, node,weight):
-        h = edge.matmul(node)
-        h_= h.matmul(weight)
-        result = h_.squeeze(-1)
+        node_ = node*weight
+        h = edge.matmul(node_)
+        result = h.squeeze(-1)
         out = result.T
         return out
 

@@ -145,7 +145,7 @@ def main(args=None):
             except Exception as e:
                 print(e)
                 continue
-        if epoch_num % 4 ==0 and epoch_num > 0:
+        if epoch_num % 4 ==0: # and epoch_num > 0:
             if parser.dataset == 'coco':
 
                 print('Evaluating dataset')
@@ -157,7 +157,7 @@ def main(args=None):
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, 'weights/att_test_{}.pt'.format(epoch_num))
+        torch.save(retinanet.module, 'weights/att_gcn_weight_{}.pt'.format(epoch_num))
         # torch.save({
         #     'model_state_dict': retinanet.state_dict(),
         #     'optimizer_state_dict': optimizer.state_dict(),
