@@ -72,7 +72,6 @@ def main(args=None):
     if dataset_val is not None:
         sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=6, drop_last=False)
         dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
-
     # Create the model
     if parser.depth == 18:
         retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=True)
@@ -86,6 +85,7 @@ def main(args=None):
         retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=True)
     else:
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
+
 
 
     use_gpu = True
