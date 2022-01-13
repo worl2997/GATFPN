@@ -53,7 +53,7 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        # out = x * wei
+        out = x * wei
         output = wei.reshape(1, -1)
 
         return output
@@ -68,7 +68,6 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
         self.make_score = MS_CAM(channels, r)
-
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
@@ -96,9 +95,20 @@ class FUB(nn.Module):
         node_feature_matirx = node_feat.unsqueeze(-1)
         return node_feature_matirx
 
+
+# 3가지 실험 진행
+# softmax -> pruning
+# pruning -> soft max
+# normalize 없이
+
     def normalize_edge(self, input, type, t):
-        k = torch.zeros(size=input.size())
-        out = torch.where(input > t, input, k)
+        # pruning -> softmax ?
+        # softmax -> pruning ?
+        weight = F.softmax(input, dim=2)
+        # k = torch.zeros(size=input.size())
+        #out = torch.where(input > t, input, torch.zeros(size=input.size()))
+        out = torch.where(weight > t, weight, torch.zeros(size=input.size()))
+
         return out
 
 
@@ -121,7 +131,7 @@ class FUB(nn.Module):
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge, 2, 0.35).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(edge, 2, 0.2).to(torch.cuda.current_device())
         h = self.feat_fusion(normalized_edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
         return out

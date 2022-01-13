@@ -33,7 +33,7 @@ def main(args=None):
             retinanet = retinanet.cuda()
 
     if torch.cuda.is_available():
-        # retinanet.load_state_dict(torch.load(parser.model_path))
+         #retinanet.load_state_dict(torch.load(parser.model_path))
         retinanet = torch.nn.DataParallel(retinanet).cuda()
     else:
         #retinanet.load_state_dict(torch.load(parser.model_path))

@@ -157,7 +157,7 @@ def main(args=None):
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, 'weights/att_fusion_adver{}.pt'.format(epoch_num))
+        torch.save(retinanet.module, 'weights/soft_max_added_{}.pt'.format(epoch_num))
         # torch.save({
         #     'model_state_dict': retinanet.state_dict(),
         #     'optimizer_state_dict': optimizer.state_dict(),
