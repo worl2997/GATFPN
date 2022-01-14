@@ -133,16 +133,12 @@ class FUB(nn.Module):
         node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
         pixels = total_pixel_size(node_feats[0])
         edge_matrix = self.make_edge_matirx(node_feats,pixels)
-        edge = edge_matrix.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        # normalized_edge = self.normalize_edge(edge_list, 'l2', 0.3).to(torch.cuda.current_device())
-        #         edge_list = edge_matrix  # .to(torch.cuda.current_device())
-
-
-        h = self.feat_fusion(edge, node_feats_matrix)
+        normalized_edge = self.normalize_edge(edge_matrix, 'l2', 0.3).to(torch.cuda.current_device())
+        h = self.feat_fusion(normalized_edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
         return out
 
