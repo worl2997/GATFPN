@@ -53,7 +53,7 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        out = x * wei
+        #out = x * wei
         output = wei.reshape(1, -1)
 
         return output
@@ -67,19 +67,35 @@ class FUB(nn.Module):
         super(FUB, self).__init__()
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
-        self.make_score = MS_CAM(channels, r)
+        self.mk_score_level_1 = MS_CAM(channels, r)
+        self.mk_score_level_2 = MS_CAM(channels, r)
+        self.mk_score_level_3 = MS_CAM(channels, r)
+        self.mk_score_level_4 = MS_CAM(channels, r)
+        self.mk_score_level_5 = MS_CAM(channels, r)
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                if i > j:
-                    pass
-                else:
-                    att_score = self.make_score(node_i + node_j)
+                # if i > j:
+                #     pass
+                # else:
+                if i==0:
+                    att_score = self.mk_score_level_1(node_i + node_j)
                     edge_list[:,i,j] = att_score
-                    edge_list[:,j,i] = att_score
+                if i==1:
+                    att_score = self.mk_score_level_2(node_i + node_j)
+                    edge_list[:,i,j] = att_score
+                if i==2:
+                    att_score = self.mk_score_level_3(node_i + node_j)
+                    edge_list[:,i,j] = att_score
+                if i==3:
+                    att_score = self.mk_score_level_4(node_i + node_j)
+                    edge_list[:,i,j] = att_score
+                else:
+                    att_score = self.mk_score_level_5(node_i + node_j)
+                    edge_list[:, i, j] = att_score
 
         return edge_list
 
@@ -93,6 +109,7 @@ class FUB(nn.Module):
 
         node_feat = init_matrix.T
         node_feature_matirx = node_feat.unsqueeze(-1)
+
         return node_feature_matirx
 
 
@@ -102,15 +119,13 @@ class FUB(nn.Module):
 # normalize 없이
 
     def normalize_edge(self, input, type, t):
+        # # softmax -> pruning ?
+        # weight = F.softmax(input, dim=2)
+        # out = torch.where(weight > t, weight, torch.zeros(size=input.size()))
         # pruning -> softmax ?
-        # softmax -> pruning ?
         weight = F.softmax(input, dim=2)
-        # k = torch.zeros(size=input.size())
-        #out = torch.where(input > t, input, torch.zeros(size=input.size()))
-        out = torch.where(weight > t, weight, torch.zeros(size=input.size()))
-
+        out = torch.where(weight > t, weight, torch.zeros(size=weight.size()))
         return out
-
 
     def feat_fusion(self, edge, node):
         h = edge.matmul(node)
@@ -126,13 +141,13 @@ class FUB(nn.Module):
         node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
         pixels = total_pixel_size(node_feats[0])
         edge_matrix = self.make_edge_matirx(node_feats,pixels)
-        edge = edge_matrix#.to(torch.cuda.current_device())
+        edge = edge_matrix.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge, 2, 0.2).to(torch.cuda.current_device())
-        h = self.feat_fusion(normalized_edge, node_feats_matrix)
+        # normalized_edge = self.normalize_edge(edge, 2, 0.2).to(torch.cuda.current_device())
+        h = self.feat_fusion(edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
         return out
 
