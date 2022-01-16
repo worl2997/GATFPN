@@ -20,7 +20,38 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
+class MS_CAM(nn.Module):
 
+    def __init__(self, channels=256, r=2):
+        super(MS_CAM, self).__init__()
+        inter_channels = int(channels // r)
+
+        self.local_att = nn.Sequential(
+            nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(channels),
+        )
+
+        self.global_att = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(channels),
+        )
+
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        xl = self.local_att(x)
+        xg = self.global_att(x)
+        xlg = xl + xg
+        wei = self.sigmoid(xlg)
+        refined  = x * wei
+        return refined
 
 class Nodefeats_make(nn.Module):
     def __init__(self, fpn_channels):
@@ -98,7 +129,8 @@ class GCN_FPN(nn.Module):
 
 
         if self.refine is not None:
-            enhanced_feat = self.refine(feats)  # input : Gather feature
+            updated_feature = self.refine(feats)  # input : Gather feature
+            enhanced_feat = self.RFC(feats, updated_feature)
 
         # step 3 :scatter refined features to multi-levels by a residual path
         outs = []
@@ -113,8 +145,6 @@ class GCN_FPN(nn.Module):
                 resized_back_feats = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
             # print(residual.size())
             outs.append(resized_back_feats)
-
-        updated_feature = self.RFC(inputs, outs)
 
 
         return updated_feature
