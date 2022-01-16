@@ -69,19 +69,14 @@ class FUB(nn.Module):
         self.node_num = node_size
        # self.make_score = MS_CAM(channels, r)
         self.w = nn.Parameter(torch.Tensor(5, 1))
-        self.conv1x1 = conv1x1(2 * 256, 256)
+        self.conv_level_0 = conv1x1(2 * 256, 256)
+        self.conv_level_1 = conv1x1(2 * 256, 256)
+        self.conv_level_2 = conv1x1(2 * 256, 256)
+        self.conv_level_3 = conv1x1(2 * 256, 256)
+        self.conv_level_4 = conv1x1(2 * 256, 256)
 
 
-    def make_score(self,x1,x2, in_feats):
-        x_add = x1 + x2  # elementwise add
-        c_cat = torch.cat([x2, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
-        target = self.conv1x1(c_cat)
-        distance = ((x2 - target).abs())
-        output = distance.reshape(1,-1)
 
-        # distance가 이게 맞나?
-        # 현재 이 distance가 과연 스칼라 값일까
-        return output
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
@@ -89,8 +84,41 @@ class FUB(nn.Module):
         edge_list = torch.zeros(pixels, self.node_num, self.node_num).to(torch.cuda.current_device())
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                att_score = self.make_score(node_i,node_j,256)
-                edge_list[:,i,j] = att_score
+                if i == 0:
+                    x_add = node_i + node_j  # elementwise add
+                    c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
+                    target = self.conv_level_0(c_cat)
+                    distance = ((node_j - target).abs())
+                    score  = distance.reshape(1, -1)
+                    edge_list[:,i,j] = score
+                elif i == 1:
+                    x_add = node_i + node_j  # elementwise add
+                    c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
+                    target = self.conv_level_1(c_cat)
+                    distance = ((node_j - target).abs())
+                    score  = distance.reshape(1, -1)
+                    edge_list[:,i,j] = score
+                elif i == 2:
+                    x_add = node_i + node_j  # elementwise add
+                    c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
+                    target = self.conv_level_2(c_cat)
+                    distance = ((node_j - target).abs())
+                    score  = distance.reshape(1, -1)
+                    edge_list[:,i,j] = score
+                elif i == 3:
+                    x_add = node_i + node_j  # elementwise add
+                    c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
+                    target = self.conv_level_3(c_cat)
+                    distance = ((node_j - target).abs())
+                    score  = distance.reshape(1, -1)
+                    edge_list[:,i,j] = score
+                else:
+                    x_add = node_i + node_j  # elementwise add
+                    c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
+                    target = self.conv_level_4(c_cat)
+                    distance = ((node_j - target).abs())
+                    score  = distance.reshape(1, -1)
+                    edge_list[:,i,j] = score
 
         return edge_list
 
@@ -108,15 +136,14 @@ class FUB(nn.Module):
 
     def normalize_edge(self, input, type, t):
         # normalize -> pruning
-        k = torch.zeros(size=input.size()).to(torch.cuda.current_device())
-        out = F.normalize(input, p=type, dim=2)
-        out_ = torch.where(out > t, input, k)
+        # k = torch.zeros(size=input.size()).to(torch.cuda.current_device())
+        out = torch.where(input > t, input, torch.zeros(size=input.size()))
+        out_ = F.normalize(out, p=type, dim=2)
 
         return out_
 
 
     def feat_fusion(self, edge, node,weight):
-
         h = edge.matmul(node)
         result = h.squeeze(-1)
         out = result.T
@@ -134,7 +161,7 @@ class FUB(nn.Module):
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge_matrix, 2, 0.35).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(edge_matrix, 2, 0.3).to(torch.cuda.current_device())
 
         h = self.feat_fusion(normalized_edge, node_feats_matrix, self.w)
         out = self.resize_back(node_feats[0].shape,h)
