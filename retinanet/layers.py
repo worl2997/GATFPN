@@ -53,7 +53,6 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        #out = x * wei
         output = wei.reshape(1, -1)
 
         return output
