@@ -3,7 +3,7 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB
+from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, new_fusion
 from retinanet.utils import BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
@@ -80,8 +80,9 @@ class GCN_FPN(nn.Module):
         self.refine_level = refine_level
         self.r = 2
         assert 0 <= self.refine_level < self.num_levels
-        self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
-        self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
+        self.refine = new_fusion(self.in_channels,16)
+        # self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
+        # self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
 
     def forward(self, inputs):
         # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
@@ -108,16 +109,16 @@ class GCN_FPN(nn.Module):
             if i < self.refine_level:
                 # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
                 #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
-                resized_back_feats = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
+                resized_back_feats = F.interpolate(enhanced_feat, size=out_size, mode='nearest')
             else:
-                resized_back_feats = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
+                resized_back_feats = F.adaptive_max_pool2d(enhanced_feat, output_size=out_size)
             # print(residual.size())
             outs.append(resized_back_feats)
 
-        updated_feature = self.RFC(inputs, outs)
+        # updated_feature = self.RFC(inputs, outs)
 
 
-        return updated_feature
+        return outs
 
 
 
