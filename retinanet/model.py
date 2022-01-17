@@ -30,10 +30,15 @@ model_urls = {
 
 # 여기서 차원수를 하나 더 늘려도 됨
 class Graph_FPN(nn.Module):
-    def __init__(self, c2, c3, c4, c5, feat_size): # [256, 512,1024, 2048] 순으로 되어있을거임
+    def __init__(self, c2, c3, c4, c5, feat_size): #  [512, 1024, 2048] 순으로 되어있을거임
         super(Graph_FPN, self).__init__()
 
         # forward 에서 input을 넣을때는 c6,c5,c4,c3 순으로 넣어주어야함
+        self.P6_make = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
+        self.P7_make = nn.Sequential(
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+        )
         self.FUB_level_0 = graph_fusion(level=0)
         self.FUB_level_1 = graph_fusion(level=1)
         self.FUB_level_2 = graph_fusion(level=2)
@@ -49,11 +54,13 @@ class Graph_FPN(nn.Module):
         return [updated_level_3_feat, updated_level_2_feat, updated_level_1_feat, updated_level_0_feat]
 
 
+# 1. 모든 채널 사이즈를 256으로 맞추고 시작
+# 2. 각 채널사이즈에 맞게 연산한 뒤 256으로 채널변경
 class graph_fusion(nn.Module):
     def __init__(self, level):
         super(graph_fusion, self).__init__()
         self.level = level
-        self.dim = [2048, 1024, 512, 256]  #실제 feature => [256, 512, 1024, 2048]
+        self.dim = [2048, 1024, 512]  #실제 feature => [512, 1024, 2048] -> 채널 사이즈를 다 256으로 맞춰야함
         self.inter_dim =self.dim[self.level]
 
         # 각 level을 기준으로 reshape
@@ -63,12 +70,7 @@ class graph_fusion(nn.Module):
                 nn.MaxPool2d(kernel_size=3, stride=2,padding=1),
                 add_conv(512, self.inter_dim, 3, 2, leaky=False),
             )
-            self.resize_level_3 = nn.Sequential(    # 3x3 -> max-pool ->3x3conv (이게 맞는지는 모르겠음, 리서치 해보기)
-                add_conv(256, self.inter_dim, 3, 2, leaky=False),
-                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
-                add_conv(self.inter_dim,self.inter_dim, 3, 2, leaky=False),
-           )
-            self.FUB_0= FUB(2048,r=4,node_size=4)
+            self.FUB_0= FUB(2048,r=2,node_size=3)
 
         elif level==1:
             self.resize_level_0 = nn.Sequential(
@@ -76,11 +78,7 @@ class graph_fusion(nn.Module):
                 upsample(scale_factor=2, mode='nearest'),
             )
             self.resize_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # 3x3conv 한번
-            self.resize_level_3 = nn.Sequential(  # max-pool -> 3x3conv
-                nn.MaxPool2d(kernel_size=3, strid=2, padding=1),
-                add_conv(256, self.inter_dim, 3, 2, leaky=False),
-            )
-            self.FUB_1= FUB(2048,r=4,node_size=4)
+            self.FUB_1= FUB(1024,r=4,node_size=4)
 
         elif level==2: # 512 기준
             self.resize_level_0 = nn.Sequential(
@@ -91,23 +89,9 @@ class graph_fusion(nn.Module):
                 add_conv(1024, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
                 upsample(scale_factor=2, mode='nearest'),
             )
-            self.resize_level_3 = add_conv(256, self.inter_dim, 3, 2, leaky=False) # 3x3conv
-            self.FUB_2= FUB(2048,r=4,node_size=4)
+            self.FUB_2= FUB(512,r=4,node_size=4)
 
-        elif level==3:
-            self.resize_level_0 = nn.Sequential(
-                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 3번확장
-                upsample(scale_factor=8, mode='nearest'),
-            )
-            self.resize_level_1 = nn.Sequential(
-                add_conv(2048, self.inter_dim, 1, 1, leaky=False),# 채널 줄이고 크기 2번확장
-                upsample(scale_factor=4, mode='nearest'),
-            )
-            self.resize_level_2 = nn.Sequential(
-                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
-                upsample(scale_factor=2, mode='nearest'),
-            )
-            self.FUB_3= FUB(2048,r=4,node_size=4)
+
 
 
     def forward(self, p_0, p_1, p_2, p_3):
