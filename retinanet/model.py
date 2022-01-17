@@ -54,7 +54,7 @@ class Graph_FPN(nn.Module):
         out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
         return out
 
-
+#
 # 1. 모든 채널 사이즈를 256으로 맞추고 시작
 # 2. 각 채널사이즈에 맞게 연산한 뒤 256으로 채널변경
 class graph_fusion(nn.Module):
