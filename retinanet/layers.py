@@ -139,7 +139,6 @@ class FUB(nn.Module):
         h = edge.matmul(node)  # mx1x5 * 5x1
         result = h.squeeze(-1)
         out = result.T # 1xm size
-        print(out.size())
         return out
 
     def resize_back(self,ori_s, h):

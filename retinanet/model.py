@@ -52,9 +52,6 @@ class Graph_FPN(nn.Module):
         updated_level_2_feat = self.FUB_level_2(c3, c4, c5)
 
         out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
-        for i in out:
-            print(i.size())
-
         return out
 
 
@@ -75,6 +72,9 @@ class graph_fusion(nn.Module):
                 nn.MaxPool2d(kernel_size=3, stride=2,padding=1),
                 add_conv(512, self.inter_dim, 3, 2, leaky=False),
             )
+            self.FUB= FUB(256, r=2, node_size=3, level=0)
+            # self.RFC = RFC(256)
+
         elif level==1:
             self.resize_level_0 = nn.Sequential(
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False), # stride_level_0 -> 차원수 줄이고 크기 한번 확장
@@ -82,6 +82,9 @@ class graph_fusion(nn.Module):
             )
             self.resize_level_1 = add_conv(1024,self.inter_dim, 1, 1, leaky=False) # 3x3 conv 한번
             self.resize_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # 3x3conv 한번
+            self.FUB = FUB(256, r=2, node_size=3, level=1)
+            # self.RFC = RFC(256)
+
         elif level==2: # 512 기준
             self.resize_level_0 = nn.Sequential(
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 scale factor - 4
@@ -92,21 +95,17 @@ class graph_fusion(nn.Module):
                 upsample(scale_factor=2, mode='nearest'),
             )
             self.resize_level_2 = add_conv(512, self.inter_dim, 1, 1, leaky=False) # 3x3conv 한번
+            self.FUB = FUB(256, r=2, node_size=3, level=2)
+            # self.RFC = RFC(256)
 
-        self.FUB_level_0 = FUB(256,r=2,node_size=3,level=0)
-        self.FUB_level_1 = FUB(256,r=2,node_size=3,level=1)
-        self.FUB_level_2 = FUB(256,r=2,node_size=3,level=2)
 
-        self.RFC_0 = RFC(256)
-        self.RFC_1 = RFC(256)
-        self.RFC_2 = RFC(256)
 
     def forward(self, c_3, c_4, c_5): # input : [512, 1024, 2048]
         if self.level==0:  # 최고 차원의 피쳐 (피라미드 꼭대기)
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_0([lev_0_res,lev_1_res,lev_2_res])
+            out = self.FUB([lev_0_res,lev_1_res,lev_2_res])
             # RFC를 추가 ablation 체크해보기
             #out = RFC_0(c_5,out)
 
@@ -114,14 +113,14 @@ class graph_fusion(nn.Module):
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_1([lev_0_res,lev_1_res,lev_2_res])
+            out = self.FUB([lev_0_res,lev_1_res,lev_2_res])
             #out = RFC_0(c_4,out)
 
         elif self.level==2:
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_2([lev_0_res,lev_1_res,lev_2_res])
+            out = self.FUB([lev_0_res,lev_1_res,lev_2_res])
             #out = RFC_0(c_3,out)
 
         return out
