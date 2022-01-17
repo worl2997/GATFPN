@@ -72,7 +72,6 @@ class MS_CAM(nn.Module):
             nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(channels),
         )
-
         self.global_att = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
@@ -81,7 +80,6 @@ class MS_CAM(nn.Module):
             nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(channels),
         )
-
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -89,62 +87,48 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        output = wei*x
-
-        return output
+        output = wei*x    # 이부분을 다르게 하면서 테스트 해보기
+        out = output.
+        return
 
 # # node_feauter은 forward의 input으로 들어감
 # GCN 기반으로 이미지 feature map을 업데이트 하는 부분
 # # node_feauter은 forward의 input으로 들어감
 
 class FUB(nn.Module):
-    def __init__(self, channels, r, node_size):
+    def __init__(self, channels, r, node_size,level):
         super(FUB, self).__init__()
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
+        self.level = level
         self.mk_score_level_1 = MS_CAM(channels, r)
         self.mk_score_level_2 = MS_CAM(channels, r)
         self.mk_score_level_3 = MS_CAM(channels, r)
-        self.mk_score_level_4 = MS_CAM(channels, r)
-        self.mk_score_level_5 = MS_CAM(channels, r)
+
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
-        edge_list = torch.zeros(pixels, self.node_num, self.node_num)
-        for i, node_i in enumerate(Node_feats):
-            for j, node_j in enumerate(Node_feats):
-                if i==0:
-                    att_score = self.mk_score_level_1(node_i + node_j)
-                    edge_list[:,i,j] = att_score
-                if i==1:
-                    att_score = self.mk_score_level_2(node_i + node_j)
-                    edge_list[:,i,j] = att_score
-                if i==2:
-                    att_score = self.mk_score_level_3(node_i + node_j)
-                    edge_list[:,i,j] = att_score
-                if i==3:
-                    att_score = self.mk_score_level_4(node_i + node_j)
-                    edge_list[:,i,j] = att_score
-                else:
-                    att_score = self.mk_score_level_5(node_i + node_j)
-                    edge_list[:, i, j] = att_score
+        edge_list = torch.zeros(pixels, 1, self.node_num)
+        ms_dic = {0: self.mk_score_level_1, 1: self.mk_score_level_2, 2: self.mk_score_level_3}
+        node_i = Node_feats[self.level]
+        for j, node_j in enumerate(Node_feats):
+            att_score = ms_dic[j](node_i + node_j)
+            edge_list[:, :, j] = att_score
 
+        print(edge_list.shape)
         return edge_list
 
     # graph 와 node feature matrix 반환
     def make_node_matrix(self, node_feats,pixels):
         # 여기에 그래프 구성 코드를 집어넣으면 됨
         init_matrix = torch.Tensor(self.node_num, pixels)
-
         for i, node in enumerate(node_feats):
             init_matrix[i] = node.reshape(1, -1)
-
         node_feat = init_matrix.T
         node_feature_matirx = node_feat.unsqueeze(-1)
-
         return node_feature_matirx
 
-    def normalize_edge(self, input, type, t):
+    def normalize_edge(self, input, t):
         # # softmax -> pruning ?
         # weight = F.softmax(input, dim=2)
         # out = torch.where(weight > t, weight, torch.zeros(size=input.size()))
@@ -154,48 +138,46 @@ class FUB(nn.Module):
         return out
 
     def feat_fusion(self, edge, node):
-        h = edge.matmul(node)
+        h = edge.matmul(node)  # mx1x5 * 5x1
         result = h.squeeze(-1)
-        out = result.T
+        out = result.T # 1xm size
+        print(out.size())
         return out
 
     def resize_back(self,ori_s, h):
-        out =h.reshape(self.node_num, ori_s[0],ori_s[1],ori_s[2],ori_s[3])
+        out = h.reshape(ori_s[0],ori_s[1],ori_s[2],ori_s[3])
         return out
 
     def forward(self, x):
         node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
         pixels = total_pixel_size(node_feats[0])
         edge_matrix = self.make_edge_matirx(node_feats,pixels)
-        edge = edge_matrix.to(torch.cuda.current_device())
+        # edge = edge_matrix.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        # normalized_edge = self.normalize_edge(edge, 2, 0.2).to(torch.cuda.current_device())
-        h = self.feat_fusion(edge, node_feats_matrix)
-        out = self.resize_back(node_feats[0].shape,h)
+        normalized_edge = self.normalize_edge(edge_matrix, 0.2).to(torch.cuda.current_device())
+        h = self.feat_fusion(normalized_edge, node_feats_matrix)
+        out = self.resize_back(node_feats[0].shape, h)
         return out
 
 
 class RFC(nn.Module):
     def __init__(self, feat_size):
         super(RFC, self).__init__()
-
         self.rfc  = nn.Sequential(
             nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0,bias=False),
             nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(feat_size),
             nn.ReLU(inplace=True),
         )
-
     def forward(self, origin, h):
         result_feat = []
         for origin_feat, updated_feat in zip(origin, h):
             feat = torch.cat([origin_feat, updated_feat], dim=1)
             out = self.rfc(feat)
             result_feat.append(out)
-
         return result_feat
 
 

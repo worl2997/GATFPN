@@ -30,28 +30,29 @@ model_urls = {
 
 # 여기서 차원수를 하나 더 늘려도 됨
 class Graph_FPN(nn.Module):
-    def __init__(self, c2, c3, c4, c5, feat_size): #  [512, 1024, 2048] 순으로 되어있을거임
+    def __init__(self, feat_size): #  [512, 1024, 2048] 순으로 되어있을거임
         super(Graph_FPN, self).__init__()
 
         # forward 에서 input을 넣을때는 c6,c5,c4,c3 순으로 넣어주어야함
-        self.P6_make = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
+        self.P6_make = nn.Conv2d(2048, feat_size, kernel_size=3, stride=2, padding=1)
         self.P7_make = nn.Sequential(
             nn.ReLU(),
-            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(256, feat_size, kernel_size=3, stride=2, padding=1),
         )
         self.FUB_level_0 = graph_fusion(level=0)
         self.FUB_level_1 = graph_fusion(level=1)
         self.FUB_level_2 = graph_fusion(level=2)
-        self.FUB_level_3 = graph_fusion(level=3)
 
-    def forward(self, c5, c4, c3, c2):
-        updated_level_0_feat = self.FUB_level_0(c5, c4, c3, c2)
-        updated_level_1_feat = self.FUB_level_1(c5, c4, c3, c2)
-        updated_level_2_feat = self.FUB_level_2(c5, c4, c3, c2)
-        updated_level_3_feat = self.FUB_level_3(c5, c4, c3, c2)
 
-        # RFC 할지는 알아서 정하기
-        return [updated_level_3_feat, updated_level_2_feat, updated_level_1_feat, updated_level_0_feat]
+    def forward(self, c3, c4, c5):
+        p6 = self.P6_make(c5)
+        p7 = self.P7_make(p6)
+
+        updated_level_0_feat = self.FUB_level_0(c3, c4, c5)
+        updated_level_1_feat = self.FUB_level_1(c3, c4, c5)
+        updated_level_2_feat = self.FUB_level_2(c3, c4, c5)
+
+        return [updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
 
 
 # 1. 모든 채널 사이즈를 256으로 맞추고 시작
@@ -60,26 +61,24 @@ class graph_fusion(nn.Module):
     def __init__(self, level):
         super(graph_fusion, self).__init__()
         self.level = level
-        self.dim = [2048, 1024, 512]  #실제 feature => [512, 1024, 2048] -> 채널 사이즈를 다 256으로 맞춰야함
-        self.inter_dim =self.dim[self.level]
+        # self.dim = [2048, 1024, 512]  #실제 feature => [512, 1024, 2048] -> 채널 사이즈를 다 256으로 맞춰야함
+        self.inter_dim = 256
 
         # 각 level을 기준으로 reshape
         if level==0:
+            self.resize_level_0 = add_conv(2048, self.inter_dim, 1, 1, leaky=False)
             self.resize_level_1 = add_conv(1024,self.inter_dim, 3, 2, leaky=False) # 3x3 conv 한번
             self.resize_level_2 = nn.Sequential(    # max-pool ->3x3conv
                 nn.MaxPool2d(kernel_size=3, stride=2,padding=1),
                 add_conv(512, self.inter_dim, 3, 2, leaky=False),
             )
-            self.FUB_0= FUB(2048,r=2,node_size=3)
-
         elif level==1:
             self.resize_level_0 = nn.Sequential(
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False), # stride_level_0 -> 차원수 줄이고 크기 한번 확장
                 upsample(scale_factor=2, mode='nearest'),
             )
+            self.resize_level_1 = add_conv(1024,self.inter_dim, 1, 1, leaky=False) # 3x3 conv 한번
             self.resize_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # 3x3conv 한번
-            self.FUB_1= FUB(1024,r=4,node_size=4)
-
         elif level==2: # 512 기준
             self.resize_level_0 = nn.Sequential(
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 scale factor - 4
@@ -89,32 +88,41 @@ class graph_fusion(nn.Module):
                 add_conv(1024, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
                 upsample(scale_factor=2, mode='nearest'),
             )
-            self.FUB_2= FUB(512,r=4,node_size=4)
+            self.resize_level_2 = add_conv(512, self.inter_dim, 1, 1, leaky=False) # 3x3conv 한번
 
+        self.FUB_level_0 = FUB(256,r=2,node_size=3,level=0)
+        self.FUB_level_1 = FUB(256,r=2,node_size=3,level=1)
+        self.FUB_level_2 = FUB(256,r=2,node_size=3,level=2)
 
+        self.RFC_0 = RFC(256)
+        self.RFC_1 = RFC(256)
+        self.RFC_2 = RFC(256)
 
+    def forward(self, c_3, c_4, c_5): # input : [512, 1024, 2048]
+        if self.level==0:  # 최고 차원의 피쳐 (피라미드 꼭대기)
+            lev_0_res = self.resize_level_0(c_5)
+            lev_1_res = self.resize_level_1(c_4)
+            lev_2_res = self.resize_level_2(c_3)
+            out = self.FUB_level_0([lev_0_res,lev_1_res,lev_2_res])
+            # RFC를 추가 ablation 체크해보기
+            #out = RFC_0(c_5,out)
 
-    def forward(self, p_0, p_1, p_2, p_3):
-        if self.level==0:
-            level_0_resized = p_0
-            level_1_resized = self.resize_level_1(p_1)
-            level_2_resized = self.resize_level_2(p_2)
-            level_3_resized = self.resize_level_3(p_3)
         elif self.level==1:
-            level_0_resized = self.resize_level_0(p_0)
-            level_1_resized = p_1
-            level_2_resized = self.resize_level_2(p_2)
-            level_3_resized = self.resize_level_3(p_3)
+            lev_0_res = self.resize_level_0(c_5)
+            lev_1_res = self.resize_level_1(c_4)
+            lev_2_res = self.resize_level_2(c_3)
+            out = self.FUB_level_1([lev_0_res,lev_1_res,lev_2_res])
+            #out = RFC_0(c_4,out)
+
         elif self.level==2:
-            level_0_resized = self.resize_level_0(p_0)
-            level_1_resized = self.resize_level_1(p_1)
-            level_2_resized = p_2
-            level_3_resized = self.resize_level_3(p_3)
-        elif self.level==3:
-            level_0_resized = self.resize_level_0(p_0)
-            level_1_resized = self.resize_level_1(p_1)
-            level_2_resized = self.resize_level_2(p_2)
-            level_3_resized = p_3
+            lev_0_res = self.resize_level_0(c_5)
+            lev_1_res = self.resize_level_1(c_4)
+            lev_2_res = self.resize_level_2(c_3)
+            out = self.FUB_level_2([lev_0_res,lev_1_res,lev_2_res])
+            #out = RFC_0(c_3,out)
+
+        return out
+
 
 
 
@@ -230,7 +238,7 @@ class ResNet(nn.Module):
         else:
             raise ValueError(f"Block type {block} not understood")
 
-        self.GCN_FPN = Graph_FPN() # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
+        self.GCN_FPN = Graph_FPN(256) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
 
         self.regressionModel = RegressionModel(256) # 256 차원이라..
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
@@ -301,7 +309,7 @@ class ResNet(nn.Module):
         x3 = self.layer3(x2) # 1024
         x4 = self.layer4(x3) # 2045
 
-        enhanced_feat = self.GCN_FPN(x1,x2,x3,x4, [i.size() for i in [x1,x2,x3,x4]]) #
+        enhanced_feat = self.GCN_FPN(x2,x3,x4)
         regression = torch.cat([self.regressionModel(feature) for feature in enhanced_feat], dim=1)
 
         classification = torch.cat([self.classificationModel(feature) for feature in enhanced_feat], dim=1)
