@@ -68,6 +68,7 @@ class graph_fusion(nn.Module):
                 nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
                 add_conv(self.inter_dim,self.inter_dim, 3, 2, leaky=False),
            )
+            self.FUB_0= FUB(2048,r=4,node_size=4)
 
         elif level==1:
             self.resize_level_0 = nn.Sequential(
@@ -79,6 +80,7 @@ class graph_fusion(nn.Module):
                 nn.MaxPool2d(kernel_size=3, strid=2, padding=1),
                 add_conv(256, self.inter_dim, 3, 2, leaky=False),
             )
+            self.FUB_1= FUB(2048,r=4,node_size=4)
 
         elif level==2: # 512 기준
             self.resize_level_0 = nn.Sequential(
@@ -90,6 +92,7 @@ class graph_fusion(nn.Module):
                 upsample(scale_factor=2, mode='nearest'),
             )
             self.resize_level_3 = add_conv(256, self.inter_dim, 3, 2, leaky=False) # 3x3conv
+            self.FUB_2= FUB(2048,r=4,node_size=4)
 
         elif level==3:
             self.resize_level_0 = nn.Sequential(
@@ -104,13 +107,8 @@ class graph_fusion(nn.Module):
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
                 upsample(scale_factor=2, mode='nearest'),
             )
+            self.FUB_3= FUB(2048,r=4,node_size=4)
 
-        # 기존 ASFF 기법
-        # compress_c = 16
-        # self.weight_level_0 = add_conv(self.inter_dim, compress_c, 1, 1, leaky=False)
-        # self.weight_level_1 = add_conv(self.inter_dim, compress_c, 1, 1, leaky=False)
-        # self.weight_level_2 = add_conv(self.inter_dim, compress_c, 1, 1, leaky=False)
-        # self.weight_levels = nn.Conv2d(compress_c * 3, 3, kernel_size=1, stride=1, padding=0)
 
     def forward(self, p_0, p_1, p_2, p_3):
         if self.level==0:
@@ -320,7 +318,6 @@ class ResNet(nn.Module):
         x4 = self.layer4(x3) # 2045
 
         enhanced_feat = self.GCN_FPN(x1,x2,x3,x4, [i.size() for i in [x1,x2,x3,x4]]) #
-
         regression = torch.cat([self.regressionModel(feature) for feature in enhanced_feat], dim=1)
 
         classification = torch.cat([self.classificationModel(feature) for feature in enhanced_feat], dim=1)

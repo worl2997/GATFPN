@@ -113,9 +113,6 @@ class FUB(nn.Module):
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
-                # if i > j:
-                #     pass
-                # else:
                 if i==0:
                     att_score = self.mk_score_level_1(node_i + node_j)
                     edge_list[:,i,j] = att_score
