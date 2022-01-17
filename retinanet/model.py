@@ -42,17 +42,16 @@ class Graph_FPN(nn.Module):
         )
 
         self.resize_level_0 = add_conv(2048, self.inter_dim, 1, 1, leaky=False)
-        self.resize_level_1 = add_conv(1024,self.inter_dim, 3, 2, leaky=False) # 3x3 conv 한번
-        self.resize_level_2 = nn.Sequential(    # max-pool ->3x3conv
-            nn.MaxPool2d(kernel_size=3, stride=2,padding=1),
-            add_conv(512, self.inter_dim, 3, 2, leaky=False),
-        )
+        self.resize_level_1 = add_conv(1024,self.inter_dim, 1, 1, leaky=False) # 3x3 conv 한번
+        self.resize_level_2 = add_conv(512, self.inter_dim, 3, 1, leaky=False) # 일단 채널사이즈만 맞춤 
         self.FUB_0 = FUB(256, r=4, node_size=3, level=0)
         self.FUB_1 = FUB(256, r=4, node_size=3, level=1)
         self.FUB_2 = FUB(256, r=4, node_size=3, level=2)
         # self.RFC = RFC(256)
 
     def forward(self, c3, c4, c5, feat_size):
+        target_size = c5.size()[2:]
+
         p6 = self.P6_make(c5)
         p7 = self.P7_make(p6)
 
@@ -60,12 +59,17 @@ class Graph_FPN(nn.Module):
         re_4 = self.resize_level_1(c4)
         re_5 = self.resize_level_2(c3) # largest feat
 
-        p5 = self.FUB_0(re_3,re_4,re_5)
-        p4 = self.FUB_1(re_3,re_4,re_5)
-        p3 = self.FUB_2(re_3,re_4,re_5)
+        k1= re_3
+        k2= F.adaptive_max_pool2d(re_4, output_size=target_size)
+        k3= F.adaptive_max_pool2d(re_5, output_size=target_size)
 
+        p_5 = self.FUB_0([k1,k2,k3])
+        p_4 = self.FUB_1([k1,k2,k3])
+        p_3 = self.FUB_2([k1,k2,k3])
 
-
+        p5 = p_5
+        p4 = F.interpolate(p_4, size=c4.size()[2:], mode='nearest')
+        p3 = F.interpolate(p_3, size=c3.size()[2:], mode='nearest')
 
         out =[p3,p4,p5,p6,p7]
 
