@@ -47,12 +47,15 @@ class Graph_FPN(nn.Module):
     def forward(self, c3, c4, c5):
         p6 = self.P6_make(c5)
         p7 = self.P7_make(p6)
-
         updated_level_0_feat = self.FUB_level_0(c3, c4, c5)
         updated_level_1_feat = self.FUB_level_1(c3, c4, c5)
         updated_level_2_feat = self.FUB_level_2(c3, c4, c5)
 
-        return [updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
+        out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
+        for i in out:
+            print(i.size())
+
+        return out
 
 
 # 1. 모든 채널 사이즈를 256으로 맞추고 시작

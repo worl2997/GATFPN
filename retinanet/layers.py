@@ -88,8 +88,8 @@ class MS_CAM(nn.Module):
         xlg = xl + xg
         wei = self.sigmoid(xlg)
         output = wei*x    # 이부분을 다르게 하면서 테스트 해보기
-        out = output.
-        return
+        out = output.reshape(1, -1)
+        return out
 
 # # node_feauter은 forward의 input으로 들어감
 # GCN 기반으로 이미지 feature map을 업데이트 하는 부분
@@ -113,9 +113,7 @@ class FUB(nn.Module):
         node_i = Node_feats[self.level]
         for j, node_j in enumerate(Node_feats):
             att_score = ms_dic[j](node_i + node_j)
-            edge_list[:, :, j] = att_score
-
-        print(edge_list.shape)
+            edge_list[:, 0, j] = att_score
         return edge_list
 
     # graph 와 node feature matrix 반환
