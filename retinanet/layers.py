@@ -75,56 +75,6 @@ class MS_CAM(nn.Module):
 # GCN 기반으로 이미지 feature map을 업데이트 하는 부분
 # # node_feauter은 forward의 input으로 들어감
 
-
-class new_fusion(nn.Module):
-    def __init__(self, channels, r=16):
-        super(new_fusion, self).__init__()
-        # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
-
-        self.inter_dim = channels
-        self.compress_c = r
-        self.refine_level_1 = MS_CAM( self.inter_dim, 2)
-        self.refine_level_2 = MS_CAM( self.inter_dim, 2)
-        self.refine_level_3 = MS_CAM( self.inter_dim, 2)
-        self.refine_level_4 = MS_CAM( self.inter_dim, 2)
-        self.refine_level_5 = MS_CAM( self.inter_dim, 2)
-
-        self.weight_level_1 = add_conv(self.inter_dim, self.compress_c, 1, 1)
-        self.weight_level_2 = add_conv(self.inter_dim, self.compress_c, 1, 1)
-        self.weight_level_3 = add_conv(self.inter_dim, self.compress_c, 1, 1)
-        self.weight_level_4 = add_conv(self.inter_dim, self.compress_c, 1, 1)
-        self.weight_level_5 = add_conv(self.inter_dim, self.compress_c, 1, 1)
-
-        self.weight_levels = nn.Conv2d(self.compress_c*5, 5, kernel_size=1, stride=1, padding=0)
-
-    def forward(self, input):
-        refined_1 = self.refine_level_1(input[0])
-        refined_2 = self.refine_level_2(input[1])
-        refined_3 = self.refine_level_3(input[2])
-        refined_4 = self.refine_level_4(input[3])
-        refined_5 = self.refine_level_5(input[4])
-
-        lvw1 = self.weight_level_1(refined_1)
-        lvw2 = self.weight_level_2(refined_2)
-        lvw3 = self.weight_level_3(refined_3)
-        lvw4 = self.weight_level_4(refined_4)
-        lvw5 = self.weight_level_5(refined_5)
-
-        levels_weight_v = torch.cat((lvw1, lvw2, lvw3,lvw4,lvw5),1)
-        levels_weight = self.weight_levels(levels_weight_v)
-        levels_weight = F.softmax(levels_weight, dim=1)
-
-        refined_feature = refined_1 * levels_weight[:,0:1,:,:]+\
-                            refined_2 * levels_weight[:,1:2,:,:]+\
-                            refined_3 * levels_weight[:,2:3,:,:]+ \
-                            refined_4 * levels_weight[:,3:4, :, :] +\
-                            refined_5 * levels_weight[:,4, :, :]
-
-        # 256차원의 fused feature 반환
-        return refined_feature
-
-
-
 class FUB(nn.Module):
     def __init__(self, channels, r, node_size):
         super(FUB, self).__init__()
@@ -174,12 +124,6 @@ class FUB(nn.Module):
         node_feature_matirx = node_feat.unsqueeze(-1)
 
         return node_feature_matirx
-
-
-# 3가지 실험 진행
-# softmax -> pruning
-# pruning -> soft max
-# normalize 없이
 
     def normalize_edge(self, input, type, t):
         # # softmax -> pruning ?

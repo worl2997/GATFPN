@@ -3,7 +3,7 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, new_fusion
+from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, add_conv
 from retinanet.utils import BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
@@ -19,42 +19,6 @@ model_urls = {
     'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
-
-
-
-class Nodefeats_make(nn.Module):
-    def __init__(self, fpn_channels):
-        super(Nodefeats_make, self).__init__()
-        self.fpn_c = fpn_channels # [256, 512, 1024, 2048] # 레벨별 채널 수
-        self.num_backbone_feats = len(self.fpn_c)
-        self.target_size = 256
-
-        self.make_C5_ = self.make_C5(self.fpn_c[-1],self.target_size) # C4 -> C5
-        self.make_C6_ = nn.Conv2d(self.target_size, self.target_size,kernel_size=3, stride=2, padding=1) # C5 -> C6
-        self.make_C1 = nn.Conv2d(in_channels=self.fpn_c[0], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C2 = nn.Conv2d(in_channels=self.fpn_c[1], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C3 = nn.Conv2d(in_channels=self.fpn_c[2], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C4 = nn.Conv2d(in_channels=self.fpn_c[3], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-
-    def make_C5(self,in_ch, out_ch):
-        stage = nn.Sequential()
-        stage.add_module('conv1', nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, stride=1, padding=0))# 1x1 channel resize
-        stage.add_module('conv2', nn.Conv2d(out_ch, out_ch,kernel_size=3, stride=2 , padding=1))  # 3x3 conv 2 stride
-        return stage
-
-
-    def forward(self, inputs):
-        C1, C2, C3, C4 = inputs
-        # C1 ~ C6 : original feature
-        C5 = self.make_C5_(C4)
-        C6 = self.make_C6_(C5)
-        #C1 = self.make_C1(C1)
-        C2 = self.make_C2(C2)
-        C3 = self.make_C3(C3)
-        C4 = self.make_C4(C4)
-
-        return [C2,C3,C4,C5,C6]
-       #  채널사이즈만 256으로 모두 맞춰줌
 
 # 256 채널에
 # origin feature와 updated feature를 기반으로 prediction head로 넘길 피쳐를 생성하는 부분
@@ -116,9 +80,95 @@ class GCN_FPN(nn.Module):
             outs.append(resized_back_feats)
 
         # updated_feature = self.RFC(inputs, outs)
-
-
         return outs
+
+
+
+class graph_fusion(nn.Module):
+    def __init__(self, level, rfb=False):
+        super(graph_fusion, self).__init__()
+        self.level = level
+        self.dim = [2048, 1024, 512, 256]  #실제 feature => [256, 512, 1024, 2048]
+        self.inter_dim =self.dim[self.level]
+
+        # 각 level을 기준으로 reshape
+        if level==0:
+            self.stride_level_1 = add_conv(1024,self.inter_dim, 3, 2, leaky=False) # 3x3 conv 한번
+            self.stride_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # max-pool ->3x3conv
+            self.stride_level_3 = add_conv(256, self.inter_dim, 3, 2, leaky=False) # 3x3 -> max-pool ->3x3conv
+
+        elif level==1:
+            self.stride_level_0 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+            self.stride_level_2 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+            self.stride_level_3 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+        elif level==2:
+            self.stride_level_0 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+            self.stride_level_1 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+            self.stride_level_3 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+        elif level==3:
+            self.stride_level_0 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+            self.stride_level_1 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+            self.stride_level_2 = nn.Sequential(
+                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(inter_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(channels),
+            )
+
+    def forward(self, input_feat):
+        if self.level==0:
+
+        pass
+
 
 
 
@@ -201,11 +251,8 @@ class ClassificationModel(nn.Module):
 
         # out is B x C x W x H, with C = n_classes + n_anchors
         out1 = out.permute(0, 2, 3, 1)
-
         batch_size, width, height, channels = out1.shape
-
         out2 = out1.view(batch_size, width, height, self.num_anchors, self.num_classes)
-
         return out2.contiguous().view(x.shape[0], -1, self.num_classes)
 
 
@@ -237,7 +284,6 @@ class ResNet(nn.Module):
         else:
             raise ValueError(f"Block type {block} not understood")
 
-        self.Node_feats = Nodefeats_make(fpn_channel_sizes)
         self.GCN_FPN = GCN_FPN(256,5,2) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
 
         self.regressionModel = RegressionModel(256) # 256 차원이라..
