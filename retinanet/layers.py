@@ -11,6 +11,28 @@ def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
 
+class upsample(nn.Module):
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+
+    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
+        super(upsample, self).__init__()
+        self.name = type(self).__name__
+        self.size = size
+        self.scale_factor = scale_factor
+        self.mode = mode
+        self.align_corners = align_corners
+
+    def forward(self, input):
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+
+    def extra_repr(self):
+        if self.scale_factor is not None:
+            info = 'scale_factor=' + str(self.scale_factor)
+        else:
+            info = 'size=' + str(self.size)
+        info += ', mode=' + self.mode
+        return info
+
 def add_conv(in_ch, out_ch, ksize, stride, leaky=True):
 
     stage = nn.Sequential()

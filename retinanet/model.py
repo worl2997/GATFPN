@@ -3,7 +3,7 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, add_conv
+from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, add_conv,upsample
 from retinanet.utils import BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
@@ -28,64 +28,29 @@ model_urls = {
 # 백본으로 부터 추출된 feature map을 기반으로 그래프의 입력으로 들어갈
 # node_feature h 와 edge feature를 생성해 주는 부분
 
-class GCN_FPN(nn.Module):
-    def __init__(self,
-                 in_channels,  # 256
-                 num_levels,  # 5
-                 refine_level=2,  # 어떤 레벨을 기준으로 refine 할건지..?
-                 conv_cfg=None,
-                 norm_cfg=None):
-        super(GCN_FPN, self).__init__()
+# 여기서 차원수를 하나 더 늘려도 됨
+class Graph_FPN(nn.Module):
+    def __init__(self, c2, c3, c4, c5, feat_size): # [256, 512,1024, 2048] 순으로 되어있을거임
+        super(Graph_FPN, self).__init__()
 
-        self.in_channels = in_channels
-        self.num_levels = num_levels
-        self.conv_cfg = conv_cfg
-        self.norm_cfg = norm_cfg
-        self.refine_level = refine_level
-        self.r = 2
-        assert 0 <= self.refine_level < self.num_levels
-        self.refine = new_fusion(self.in_channels,16)
-        # self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
-        # self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
+        # forward 에서 input을 넣을때는 c6,c5,c4,c3 순으로 넣어주어야함
+        self.FUB_level_0 = graph_fusion(level=0)
+        self.FUB_level_1 = graph_fusion(level=1)
+        self.FUB_level_2 = graph_fusion(level=2)
+        self.FUB_level_3 = graph_fusion(level=3)
 
-    def forward(self, inputs):
-        # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
-        feats = []
-        gather_size = inputs[self.refine_level].size()[2:]  # (뒤에 hxw 사이즈 반납)
-        # 피쳐들의 사이즈를 특정 기준으로 모두 통일
-        for i in range(self.num_levels):
-            if i < self.refine_level:
-                gathered = F.adaptive_max_pool2d(inputs[i], output_size=gather_size)
-            else:
-                #gathered = nn.Upsample(inputs[i], size=tuple(gather_size), mode='nearest')
-                gathered = F.interpolate(inputs[i], size=gather_size, mode='nearest')
-            feats.append(gathered)
+    def forward(self, c5, c4, c3, c2):
+        updated_level_0_feat = self.FUB_level_0(c5, c4, c3, c2)
+        updated_level_1_feat = self.FUB_level_1(c5, c4, c3, c2)
+        updated_level_2_feat = self.FUB_level_2(c5, c4, c3, c2)
+        updated_level_3_feat = self.FUB_level_3(c5, c4, c3, c2)
 
-
-        if self.refine is not None:
-            enhanced_feat = self.refine(feats)  # input : Gather feature
-
-        # step 3 :scatter refined features to multi-levels by a residual path
-        outs = []
-        for i in range(self.num_levels):
-            out_size = inputs[i].size()[2:]  # 해당하는 원래 original size
-
-            if i < self.refine_level:
-                # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
-                #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
-                resized_back_feats = F.interpolate(enhanced_feat, size=out_size, mode='nearest')
-            else:
-                resized_back_feats = F.adaptive_max_pool2d(enhanced_feat, output_size=out_size)
-            # print(residual.size())
-            outs.append(resized_back_feats)
-
-        # updated_feature = self.RFC(inputs, outs)
-        return outs
-
+        # RFC 할지는 알아서 정하기
+        return [updated_level_3_feat, updated_level_2_feat, updated_level_1_feat, updated_level_0_feat]
 
 
 class graph_fusion(nn.Module):
-    def __init__(self, level, rfb=False):
+    def __init__(self, level):
         super(graph_fusion, self).__init__()
         self.level = level
         self.dim = [2048, 1024, 512, 256]  #실제 feature => [256, 512, 1024, 2048]
@@ -93,82 +58,81 @@ class graph_fusion(nn.Module):
 
         # 각 level을 기준으로 reshape
         if level==0:
-            self.stride_level_1 = add_conv(1024,self.inter_dim, 3, 2, leaky=False) # 3x3 conv 한번
-            self.stride_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # max-pool ->3x3conv
-            self.stride_level_3 = add_conv(256, self.inter_dim, 3, 2, leaky=False) # 3x3 -> max-pool ->3x3conv
+            self.resize_level_1 = add_conv(1024,self.inter_dim, 3, 2, leaky=False) # 3x3 conv 한번
+            self.resize_level_2 = nn.Sequential(    # max-pool ->3x3conv
+                nn.MaxPool2d(kernel_size=3, stride=2,padding=1),
+                add_conv(512, self.inter_dim, 3, 2, leaky=False),
+            )
+            self.resize_level_3 = nn.Sequential(    # 3x3 -> max-pool ->3x3conv (이게 맞는지는 모르겠음, 리서치 해보기)
+                add_conv(256, self.inter_dim, 3, 2, leaky=False),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+                add_conv(self.inter_dim,self.inter_dim, 3, 2, leaky=False),
+           )
 
         elif level==1:
-            self.stride_level_0 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+            self.resize_level_0 = nn.Sequential(
+                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # stride_level_0 -> 차원수 줄이고 크기 한번 확장
+                upsample(scale_factor=2, mode='nearest'),
             )
-            self.stride_level_2 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+            self.resize_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # 3x3conv 한번
+            self.resize_level_3 = nn.Sequential(  # max-pool -> 3x3conv
+                nn.MaxPool2d(kernel_size=3, strid=2, padding=1),
+                add_conv(256, self.inter_dim, 3, 2, leaky=False),
             )
-            self.stride_level_3 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+
+        elif level==2: # 512 기준
+            self.resize_level_0 = nn.Sequential(
+                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 scale factor - 4
+                upsample(scale_factor=4, mode='nearest'),
             )
-        elif level==2:
-            self.stride_level_0 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+            self.resize_level_1 = nn.Sequential(
+                add_conv(1024, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
+                upsample(scale_factor=2, mode='nearest'),
             )
-            self.stride_level_1 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
-            )
-            self.stride_level_3 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
-            )
+            self.resize_level_3 = add_conv(256, self.inter_dim, 3, 2, leaky=False) # 3x3conv
+
         elif level==3:
-            self.stride_level_0 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+            self.resize_level_0 = nn.Sequential(
+                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 3번확장
+                upsample(scale_factor=8, mode='nearest'),
             )
-            self.stride_level_1 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+            self.resize_level_1 = nn.Sequential(
+                add_conv(2048, self.inter_dim, 1, 1, leaky=False),# 채널 줄이고 크기 2번확장
+                upsample(scale_factor=4, mode='nearest'),
             )
-            self.stride_level_2 = nn.Sequential(
-                nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(inter_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(channels),
+            self.resize_level_2 = nn.Sequential(
+                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
+                upsample(scale_factor=2, mode='nearest'),
             )
 
-    def forward(self, input_feat):
+        # 기존 ASFF 기법
+        # compress_c = 16
+        # self.weight_level_0 = add_conv(self.inter_dim, compress_c, 1, 1, leaky=False)
+        # self.weight_level_1 = add_conv(self.inter_dim, compress_c, 1, 1, leaky=False)
+        # self.weight_level_2 = add_conv(self.inter_dim, compress_c, 1, 1, leaky=False)
+        # self.weight_levels = nn.Conv2d(compress_c * 3, 3, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, p_0, p_1, p_2, p_3):
         if self.level==0:
-
-        pass
-
+            level_0_resized = p_0
+            level_1_resized = self.resize_level_1(p_1)
+            level_2_resized = self.resize_level_2(p_2)
+            level_3_resized = self.resize_level_3(p_3)
+        elif self.level==1:
+            level_0_resized = self.resize_level_0(p_0)
+            level_1_resized = p_1
+            level_2_resized = self.resize_level_2(p_2)
+            level_3_resized = self.resize_level_3(p_3)
+        elif self.level==2:
+            level_0_resized = self.resize_level_0(p_0)
+            level_1_resized = self.resize_level_1(p_1)
+            level_2_resized = p_2
+            level_3_resized = self.resize_level_3(p_3)
+        elif self.level==3:
+            level_0_resized = self.resize_level_0(p_0)
+            level_1_resized = self.resize_level_1(p_1)
+            level_2_resized = self.resize_level_2(p_2)
+            level_3_resized = p_3
 
 
 
@@ -284,7 +248,7 @@ class ResNet(nn.Module):
         else:
             raise ValueError(f"Block type {block} not understood")
 
-        self.GCN_FPN = GCN_FPN(256,5,2) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
+        self.GCN_FPN = Graph_FPN() # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
 
         self.regressionModel = RegressionModel(256) # 256 차원이라..
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
@@ -350,14 +314,12 @@ class ResNet(nn.Module):
         x = self.relu(x)
         x = self.maxpool(x)
 
-        x1 = self.layer1(x)
-        x2 = self.layer2(x1)
-        x3 = self.layer3(x2)
-        x4 = self.layer4(x3)
-        # 이부분을 짜야함
-        # 구현이 어려운 이유가 backbone, neck, head가 모두 한부분으로 연결되어있음
-        Node_features = self.Node_feats([x1, x2, x3, x4]) # FPN으로 부터 feature 추출 -> 나중에 이거 기반으로 컨트롤좀 해보기
-        enhanced_feat = self.GCN_FPN(Node_features)
+        x1 = self.layer1(x) # 256
+        x2 = self.layer2(x1) # 512
+        x3 = self.layer3(x2) # 1024
+        x4 = self.layer4(x3) # 2045
+
+        enhanced_feat = self.GCN_FPN(x1,x2,x3,x4, [i.size() for i in [x1,x2,x3,x4]]) #
 
         regression = torch.cat([self.regressionModel(feature) for feature in enhanced_feat], dim=1)
 
