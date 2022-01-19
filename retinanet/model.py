@@ -30,15 +30,12 @@ class Graph_FPN(nn.Module):
         self.fusion_level_1 = graph_fusion(level=1)
         self.fusion_level_2 = graph_fusion(level=2)
 
-
     def forward(self, c3, c4, c5): # large feat -> small feat
         p6 = self.P6_make(c5)
-        p_6 = p6
-        p7 = self.P7_make(p_6)
+        p7 = self.P7_make(p6)
         updated_level_0_feat = self.fusion_level_0(c3, c4, c5)
         updated_level_1_feat = self.fusion_level_1(c3, c4, c5)
         updated_level_2_feat = self.fusion_level_2(c3, c4, c5)
-
         out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
         return out
 
