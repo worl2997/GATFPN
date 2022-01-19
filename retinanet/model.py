@@ -1,16 +1,12 @@
-import torch.nn as nn
 import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, add_conv,upsample
+from retinanet.layers import BasicBlock, Bottleneck, graph_fusion
 from retinanet.utils import BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
-import torch.nn.functional as F
 import torch.nn as nn
-
-
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -20,15 +16,6 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
-# 256 채널에
-# origin feature와 updated feature를 기반으로 prediction head로 넘길 피쳐를 생성하는 부분
-# 그래프 노드 -> 5개
-# fmap_size 계산 : 256 채널, 42x 25
-
-# 백본으로 부터 추출된 feature map을 기반으로 그래프의 입력으로 들어갈
-# node_feature h 와 edge feature를 생성해 주는 부분
-
-# 여기서 차원수를 하나 더 늘려도 됨
 class Graph_FPN(nn.Module):
     def __init__(self, feat_size): #  [512, 1024, 2048] 순으로 되어있을거임
         super(Graph_FPN, self).__init__()
@@ -39,91 +26,21 @@ class Graph_FPN(nn.Module):
             nn.ReLU(),
             nn.Conv2d(256, feat_size, kernel_size=3, stride=2, padding=1),
         )
-        self.FUB_level_0 = graph_fusion(level=0)
-        self.FUB_level_1 = graph_fusion(level=1)
-        self.FUB_level_2 = graph_fusion(level=2)
+        self.fusion_level_0 = graph_fusion(level=0)
+        self.fusion_level_1 = graph_fusion(level=1)
+        self.fusion_level_2 = graph_fusion(level=2)
 
 
-    def forward(self, c3, c4, c5):
+    def forward(self, c3, c4, c5): # large feat -> small feat
         p6 = self.P6_make(c5)
-        p7 = self.P7_make(p6)
-        updated_level_0_feat = self.FUB_level_0(c3, c4, c5)
-        updated_level_1_feat = self.FUB_level_1(c3, c4, c5)
-        updated_level_2_feat = self.FUB_level_2(c3, c4, c5)
+        p_6 = p6
+        p7 = self.P7_make(p_6)
+        updated_level_0_feat = self.fusion_level_0(c3, c4, c5)
+        updated_level_1_feat = self.fusion_level_1(c3, c4, c5)
+        updated_level_2_feat = self.fusion_level_2(c3, c4, c5)
 
         out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
         return out
-
-#
-# 1. 모든 채널 사이즈를 256으로 맞추고 시작
-# 2. 각 채널사이즈에 맞게 연산한 뒤 256으로 채널변경
-class graph_fusion(nn.Module):
-    def __init__(self, level):
-        super(graph_fusion, self).__init__()
-        self.level = level
-        # self.dim = [2048, 1024, 512]  #실제 feature => [512, 1024, 2048] -> 채널 사이즈를 다 256으로 맞춰야함
-        self.inter_dim = 256
-
-        # 각 level을 기준으로 reshape
-        if level==0:
-            self.resize_level_0 = add_conv(2048, self.inter_dim, 1, 1, leaky=False)
-            self.resize_level_1 = add_conv(1024,self.inter_dim, 3, 2, leaky=False) # 3x3 conv 한번
-            self.resize_level_2 = nn.Sequential(    # max-pool ->3x3conv
-                nn.MaxPool2d(kernel_size=3, stride=2,padding=1),
-                add_conv(512, self.inter_dim, 3, 2, leaky=False),
-            )
-            self.FUB= FUB(256, r=2, node_size=3, level=0)
-            # self.RFC = RFC(256)
-
-        elif level==1:
-            self.resize_level_0 = nn.Sequential(
-                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # stride_level_0 -> 차원수 줄이고 크기 한번 확장
-                upsample(scale_factor=2, mode='nearest'),
-            )
-            self.resize_level_1 = add_conv(1024,self.inter_dim, 1, 1, leaky=False) # 3x3 conv 한번
-            self.resize_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False) # 3x3conv 한번
-            self.FUB = FUB(256, r=2, node_size=3, level=1)
-            # self.RFC = RFC(256)
-
-        elif level==2: # 512 기준
-            self.resize_level_0 = nn.Sequential(
-                add_conv(2048, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 scale factor - 4
-                upsample(scale_factor=4, mode='nearest'),
-            )
-            self.resize_level_1 = nn.Sequential(
-                add_conv(1024, self.inter_dim, 1, 1, leaky=False), # 채널 줄이고 크기 1번확장
-                upsample(scale_factor=2, mode='nearest'),
-            )
-            self.resize_level_2 = add_conv(512, self.inter_dim, 1, 1, leaky=False) # 3x3conv 한번
-            self.FUB = FUB(256, r=2, node_size=3, level=2)
-            # self.RFC = RFC(256)
-
-    def forward(self, c_3, c_4, c_5): # input : [512, 1024, 2048]
-        if self.level==0:  # 최고 차원의 피쳐 (피라미드 꼭대기)
-            lev_0_res = self.resize_level_0(c_5)
-            lev_1_res = self.resize_level_1(c_4)
-            lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB([lev_0_res,lev_1_res,lev_2_res])
-            # RFC를 추가 ablation 체크해보기
-            #out = RFC_0(c_5,out)
-
-        elif self.level==1:
-            lev_0_res = self.resize_level_0(c_5)
-            lev_1_res = self.resize_level_1(c_4)
-            lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB([lev_0_res,lev_1_res,lev_2_res])
-            #out = RFC_0(c_4,out)
-
-        elif self.level==2:
-            lev_0_res = self.resize_level_0(c_5)
-            lev_1_res = self.resize_level_1(c_4)
-            lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB([lev_0_res,lev_1_res,lev_2_res])
-            #out = RFC_0(c_3,out)
-
-        return out
-
-
 
 
 class RegressionModel(nn.Module): #들어오는 feature 수를 교정해 주어야함
@@ -163,7 +80,6 @@ class RegressionModel(nn.Module): #들어오는 feature 수를 교정해 주어�
         out = out.permute(0, 2, 3, 1)
 
         return out.contiguous().view(out.shape[0], -1, 4)
-
 
 class ClassificationModel(nn.Module):
     def __init__(self, num_features_in, num_anchors=9, num_classes=80, prior=0.01, feature_size=256):
@@ -209,38 +125,41 @@ class ClassificationModel(nn.Module):
         out2 = out1.view(batch_size, width, height, self.num_anchors, self.num_classes)
         return out2.contiguous().view(x.shape[0], -1, self.num_classes)
 
-
 class ResNet(nn.Module):
-        # layers -> 각각 layer를 몇번 반복사는지 알려줌
-        #  ResNet(num_classes, BasicBlock, [2, 2, 2, 2], **kwargs)
+
+    # layers -> 각각 layer를 몇번 반복사는지 알려줌
+    #  ResNet(num_classes, BasicBlock, [2, 2, 2, 2], **kwargs)
     def __init__(self, num_classes, block, layers):
-        self.node_channel_size = 256 # 일단 임의로 이렇게 지정
+        self.node_channel_size = 256  # 일단 임의로 이렇게 지정
 
         self.inplanes = 64
         super(ResNet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False) #
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)  #
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
 
-
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])  # C1 -> output_size 56x56 (이미지 사이즈에 따라서 다름)
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2) #C2 -> output_size 28x28
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2) #C3 -> 14x14
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2) #C4 -> 7x7
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)  # C2 -> output_size 28x28
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)  # C3 -> 14x14
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)  # C4 -> 7x7
 
         if block == BasicBlock:
-            fpn_channel_sizes = [self.layer1[layers[0] - 1].conv2.out_channels , self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
-                         self.layer4[layers[3] - 1].conv2.out_channels]
+            fpn_channel_sizes = [self.layer1[layers[0] - 1].conv2.out_channels,
+                                 self.layer2[layers[1] - 1].conv2.out_channels,
+                                 self.layer3[layers[2] - 1].conv2.out_channels,
+                                 self.layer4[layers[3] - 1].conv2.out_channels]
         elif block == Bottleneck:
-            fpn_channel_sizes = [self.layer1[layers[0] - 1].conv3.out_channels, self.layer2[layers[1] - 1].conv3.out_channels, self.layer3[layers[2] - 1].conv3.out_channels,
-                         self.layer4[layers[3] - 1].conv3.out_channels]
+            fpn_channel_sizes = [self.layer1[layers[0] - 1].conv3.out_channels,
+                                 self.layer2[layers[1] - 1].conv3.out_channels,
+                                 self.layer3[layers[2] - 1].conv3.out_channels,
+                                 self.layer4[layers[3] - 1].conv3.out_channels]
         else:
             raise ValueError(f"Block type {block} not understood")
 
-        self.GCN_FPN = Graph_FPN(256) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
+        self.GCN_FPN = Graph_FPN(256)  # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
 
-        self.regressionModel = RegressionModel(256) # 256 차원이라..
+        self.regressionModel = RegressionModel(256)  # 256 차원이라..
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
 
         self.anchors = Anchors()
@@ -285,7 +204,6 @@ class ResNet(nn.Module):
         # 마지막 블록의 conv2 의 out channel을 따로 뽑아낼 수 있음
         return nn.Sequential(*layers)
 
-
     def freeze_bn(self):
         '''Freeze BatchNorm layers.'''
         for layer in self.modules():
@@ -304,21 +222,19 @@ class ResNet(nn.Module):
         x = self.relu(x)
         x = self.maxpool(x)
 
-        x1 = self.layer1(x) # 256
-        x2 = self.layer2(x1) # 512
-        x3 = self.layer3(x2) # 1024
-        x4 = self.layer4(x3) # 2045
+        x1 = self.layer1(x)  # 256
+        x2 = self.layer2(x1)  # 512
+        x3 = self.layer3(x2)  # 1024
+        x4 = self.layer4(x3)  # 2045
 
-        enhanced_feat = self.GCN_FPN(x2,x3,x4)
+        enhanced_feat = self.GCN_FPN(x2, x3, x4)
         regression = torch.cat([self.regressionModel(feature) for feature in enhanced_feat], dim=1)
 
         classification = torch.cat([self.classificationModel(feature) for feature in enhanced_feat], dim=1)
         anchors = self.anchors(img_batch)
 
-
-
         if self.training:
-            return self.focalLoss(classification, regression,anchors, annotations)
+            return self.focalLoss(classification, regression, anchors, annotations)
         else:
             transformed_anchors = self.regressBoxes(anchors, regression)
             transformed_anchors = self.clipBoxes(transformed_anchors, img_batch)
@@ -359,8 +275,6 @@ class ResNet(nn.Module):
                 finalAnchorBoxesCoordinates = torch.cat((finalAnchorBoxesCoordinates, anchorBoxes[anchors_nms_idx]))
 
             return [finalScores, finalAnchorBoxesIndexes, finalAnchorBoxesCoordinates]
-
-
 
 def resnet18(num_classes, pretrained=False, **kwargs):
     """Constructs a ResNet-18 model.
@@ -415,5 +329,3 @@ def resnet152(num_classes, pretrained=False, **kwargs):
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152'], model_dir='.'), strict=False)
     return model
-
-
