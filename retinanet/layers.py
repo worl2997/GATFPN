@@ -60,7 +60,6 @@ class conv1x1(nn.Module):
 
 
 class MS_CAM(nn.Module):
-
     def __init__(self, channels=64, r=2):
         super(MS_CAM, self).__init__()
         inter_channels = int(channels // r)
@@ -88,12 +87,14 @@ class MS_CAM(nn.Module):
         xlg = xl + xg
         wei = self.sigmoid(xlg)
         output = wei*x    # 이부분을 다르게 하면서 테스트 해보기
-        out = output.reshape(1, -1)
+        out = output.view(1, -1) # 1xm
         return out
 
 # # node_feauter은 forward의 input으로 들어감
 # GCN 기반으로 이미지 feature map을 업데이트 하는 부분
 # # node_feauter은 forward의 input으로 들어감
+
+
 
 class FUB(nn.Module):
     def __init__(self, channels, r, node_size,level):
@@ -114,16 +115,20 @@ class FUB(nn.Module):
         for j, node_j in enumerate(Node_feats):
             att_score = ms_dic[j](node_i + node_j)
             edge_list[:, 0, j] = att_score
-        return edge_list
+
+        print('edge list size!! \n',edge_list.shape)
+        return edge_list  # 3xm
 
     # graph 와 node feature matrix 반환
     def make_node_matrix(self, node_feats,pixels):
         # 여기에 그래프 구성 코드를 집어넣으면 됨
         init_matrix = torch.Tensor(self.node_num, pixels)
         for i, node in enumerate(node_feats):
-            init_matrix[i] = node.reshape(1, -1)
+            init_matrix[i] = node.view(1, -1)
         node_feat = init_matrix.T
         node_feature_matirx = node_feat.unsqueeze(-1)
+
+
         return node_feature_matirx
 
     def normalize_edge(self, input, t):
