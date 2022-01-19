@@ -67,7 +67,7 @@ class MS_CAM(nn.Module):
         self.local_att = nn.Sequential(
             nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(inter_channels),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(channels),
         )
@@ -75,7 +75,7 @@ class MS_CAM(nn.Module):
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(inter_channels),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(channels),
         )
@@ -138,7 +138,7 @@ class graph_fusion(nn.Module):
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_0([lev_0_res, lev_1_res, lev_2_res])
+            out = self.FUB_level_0([lev_0_res, lev_1_res, lev_2_res]) # level_0의 사이즈에 모두 맞춰줌
             # out = RFC_0(c_5,out)
 
         elif self.level == 1:
@@ -163,18 +163,19 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
         self.level = level
-        self.mk_score_level_1 = MS_CAM(channels, r)
-        self.mk_score_level_2 = MS_CAM(channels, r)
-        self.mk_score_level_3 = MS_CAM(channels, r)
+        self.mk_score = MS_CAM(channels, r)
+        # self.mk_score_level_1 = MS_CAM(channels, r)
+        # self.mk_score_level_2 = MS_CAM(channels, r)
+        # self.mk_score_level_3 = MS_CAM(channels, r)
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
         edge_list = torch.zeros(pixels, 1, self.node_num)
-        ms_dic = {0: self.mk_score_level_1, 1: self.mk_score_level_2, 2: self.mk_score_level_3}
+        # ms_dic ~
         node_i = Node_feats[self.level]
         for j, node_j in enumerate(Node_feats):
-            att_score = ms_dic[j](node_i + node_j)
+            att_score = self.mk_score(node_i + node_j)# ms_dic[j](node_i + node_j)
             edge_list[:, 0, j] = att_score
         return edge_list
 
