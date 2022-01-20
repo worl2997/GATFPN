@@ -33,10 +33,11 @@ class Graph_FPN(nn.Module):
     def forward(self, c3, c4, c5): # large feat -> small feat
         p6 = self.P6_make(c5)
         p7 = self.P7_make(p6)
-        updated_level_0_feat = self.fusion_level_0(c3, c4, c5)
-        updated_level_1_feat = self.fusion_level_1(c3, c4, c5)
-        updated_level_2_feat = self.fusion_level_2(c3, c4, c5)
-        out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
+        uf_0 = self.fusion_level_0(c3, c4, c5) # 작은
+        uf_1 = self.fusion_level_1(c3, c4, c5) # 중간
+        uf_2 = self.fusion_level_2(c3, c4, c5) # 제일 큰 피쳐
+        out =[uf_2,uf_1,uf_0,p6,p7]
+
         return out
 
 
