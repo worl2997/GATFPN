@@ -97,8 +97,6 @@ class graph_fusion(nn.Module):
             self.FUB = FUB(256, r=2, node_size=3, level=2)
             # self.RFC = RFC(256)
 
-
-
     def forward(self, c_3, c_4, c_5): # input : [512, 1024, 2048]
         if self.level==0:  # 최고 차원의 피쳐 (피라미드 꼭대기)
             lev_0_res = self.resize_level_0(c_5)
