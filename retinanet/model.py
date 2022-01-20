@@ -39,17 +39,16 @@ class Graph_FPN(nn.Module):
             nn.ReLU(),
             nn.Conv2d(256, feat_size, kernel_size=3, stride=2, padding=1),
         )
-        self.FUB_level_0 = graph_fusion(level=0)
-        self.FUB_level_1 = graph_fusion(level=1)
-        self.FUB_level_2 = graph_fusion(level=2)
-
+        self.gf_0 = graph_fusion(level=0)
+        self.gf_1 = graph_fusion(level=1)
+        self.gf_2 = graph_fusion(level=2)
 
     def forward(self, c3, c4, c5):
         p6 = self.P6_make(c5)
         p7 = self.P7_make(p6)
-        updated_level_0_feat = self.FUB_level_0(c3, c4, c5)
-        updated_level_1_feat = self.FUB_level_1(c3, c4, c5)
-        updated_level_2_feat = self.FUB_level_2(c3, c4, c5)
+        updated_level_0_feat = self.gf_0(c3, c4, c5)  # high level
+        updated_level_1_feat = self.gf_1(c3, c4, c5)  # low_level
+        updated_level_2_feat = self.gf_2(c3, c4, c5)
 
         out =[updated_level_2_feat,updated_level_1_feat,updated_level_0_feat,p6,p7]
         return out

@@ -87,8 +87,7 @@ class MS_CAM(nn.Module):
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg)
-        output = wei*x    # 이부분을 다르게 하면서 테스트 해보기
-        out = output.reshape(1, -1)
+        out = wei.reshape(1, -1)
         return out
 
 # # node_feauter은 forward의 input으로 들어감
@@ -101,18 +100,15 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
         self.level = level
-        self.mk_score_level_1 = MS_CAM(channels, r)
-        self.mk_score_level_2 = MS_CAM(channels, r)
-        self.mk_score_level_3 = MS_CAM(channels, r)
+        self.mk_score = MS_CAM(channels, r)
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
         edge_list = torch.zeros(pixels, 1, self.node_num)
-        ms_dic = {0: self.mk_score_level_1, 1: self.mk_score_level_2, 2: self.mk_score_level_3}
         node_i = Node_feats[self.level]
         for j, node_j in enumerate(Node_feats):
-            att_score = ms_dic[j](node_i + node_j)
+            att_score = self.mk_score(node_i + node_j)
             edge_list[:, 0, j] = att_score
         return edge_list
 
@@ -127,10 +123,7 @@ class FUB(nn.Module):
         return node_feature_matirx
 
     def normalize_edge(self, input, t):
-        # # softmax -> pruning ?
-        # weight = F.softmax(input, dim=2)
-        # out = torch.where(weight > t, weight, torch.zeros(size=input.size()))
-        # pruning -> softmax ?
+        # softmax를 해야하는가
         weight = F.softmax(input, dim=2)
         out = torch.where(weight > t, weight, torch.zeros(size=weight.size()))
         return out
@@ -149,7 +142,6 @@ class FUB(nn.Module):
         node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
         pixels = total_pixel_size(node_feats[0])
         edge_matrix = self.make_edge_matirx(node_feats,pixels)
-        # edge = edge_matrix.to(torch.cuda.current_device())
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
 
