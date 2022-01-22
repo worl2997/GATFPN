@@ -143,7 +143,6 @@ class GCN_FPN(nn.Module):
                 resized_back_feats = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
             else:
                 resized_back_feats = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
-            # print(residual.size())
             outs.append(resized_back_feats)
 
 
