@@ -6,6 +6,19 @@ from sklearn import preprocessing
 from retinanet.utils import total_pixel_size
 
 
+def add_conv(in_ch, out_ch, ksize, stride, leaky=True):
+    stage = nn.Sequential()
+    pad = (ksize - 1) // 2
+    stage.add_module('conv', nn.Conv2d(in_channels=in_ch,
+                                       out_channels=out_ch, kernel_size=ksize, stride=stride,
+                                       padding=pad, bias=False))
+    stage.add_module('batch_norm', nn.BatchNorm2d(out_ch))
+    if leaky:
+        stage.add_module('leaky', nn.LeakyReLU(0.1))
+    else:
+        stage.add_module('relu6', nn.ReLU6(inplace=True))
+    return stage
+
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,

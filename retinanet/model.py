@@ -3,7 +3,7 @@ import torch
 import math
 import torch.utils.model_zoo as model_zoo
 from torchvision.ops import nms
-from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB
+from retinanet.layers import BasicBlock, Bottleneck, RFC, FUB, add_conv
 from retinanet.utils import BBoxTransform, ClipBoxes
 from retinanet.anchors import Anchors
 from retinanet import losses
@@ -87,14 +87,13 @@ class Nodefeats_make(nn.Module):
         return [C2,C3,C4,C5,C6]
        #  채널사이즈만 256으로 모두 맞춰줌
 
-# 256 채널에
-# origin feature와 updated feature를 기반으로 prediction head로 넘길 피쳐를 생성하는 부분
-# 그래프 노드 -> 5개
-# fmap_size 계산 : 256 채널, 42x 25
 
-# 백본으로 부터 추출된 feature map을 기반으로 그래프의 입력으로 들어갈
-# node_feature h 와 edge feature를 생성해 주는 부분
-
+'''
+1.channel_resize-> 256 
+2.resize to intermediate feature scale 
+3.revise the FUB 
+4.revise MS_cam based RFC 
+'''
 class GCN_FPN(nn.Module):
     def __init__(self,
                  in_channels,  # 256
@@ -338,8 +337,7 @@ class ResNet(nn.Module):
         x4 = self.layer4(x3)
         # 이부분을 짜야함
         # 구현이 어려운 이유가 backbone, neck, head가 모두 한부분으로 연결되어있음
-        Node_features = self.Node_feats([x1, x2, x3, x4]) # FPN으로 부터 feature 추출 -> 나중에 이거 기반으로 컨트롤좀 해보기
-        enhanced_feat = self.GCN_FPN(Node_features)
+        enhanced_feat = self.GCN_FPN([x2,x3,x4])
 
         regression = torch.cat([self.regressionModel(feature) for feature in enhanced_feat], dim=1)
 
