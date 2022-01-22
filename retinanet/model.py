@@ -39,22 +39,23 @@ class GCN_FPN(nn.Module):
         self.n1_make = add_conv(512, in_channels, 1,1, leaky=False)
         self.n2_make = add_conv(1024, in_channels, 1,1, leaky=False)
         self.n3_make = add_conv(2048, in_channels, 1,1, leaky=False)
-        self.n4_make = nn.add_conv(2048, in_channels, 3, 2, leaky=False),
-        self.n5_make = nn.add_conv(in_channels, in_channels, 3, 2, leaky=False)
-
-        self.refine =  FUB(in_channels, self.r, num_levels)  # forward input -> resize node list
-        self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
+        self.n4_make = add_conv(2048, in_channels, 3, 2, leaky=False),
+        self.n5_make = add_conv(in_channels, in_channels, 3, 2, leaky=False)
+        self.refine =  FUB(in_channels, num_levels)  # forward input -> resize node list
+        self.RFC = RFC(in_channels,r)  # forward input -> updated feature, origin_feature
 
     def forward(self, origin_feat):
         # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
+
+        n4 = self.n4_make(origin_feat[2])
+        n5 = self.n5_make(n4)
+
         n1 = self.n1_make(origin_feat[0])
         n2 = self.n2_make(origin_feat[1])
         n3 = self.n3_make(origin_feat[-1])
-        n4 = self.n4_make(origin_feat[-1])
-        n5 = self.n5_make(n4)
+
         node_feat = [n1,n2,n3,n4,n5]
         gather_feat = []
-
         gather_size = node_feat[self.refine_level].size()[2:]  # (뒤에 hxw 사이즈 반납)
         # 피쳐들의 사이즈를 특정 기준으로 모두 통일
         for i in range(self.num_levels):
@@ -65,6 +66,7 @@ class GCN_FPN(nn.Module):
             gather_feat.append(gathered)
 
         if self.refine is not None:
+            print('FUB!!!!')
             updated_feature = self.refine(gather_feat)  # input : Gather feature
 
         # step 3 :scatter refined features to multi-levels by a residual path
@@ -198,8 +200,7 @@ class ResNet(nn.Module):
         else:
             raise ValueError(f"Block type {block} not understood")
 
-        self.Node_feats = Nodefeats_make(fpn_channel_sizes)
-        self.GCN_FPN = GCN_FPN(in_channels=256,num_levels=5,refine_level=2,r=4) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
+        self.GCN_FPN = GCN_FPN(in_channels=256,num_levels=5,refine_level=2,r=2) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
 
         self.regressionModel = RegressionModel(256) # 256 차원이라..
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from sklearn import preprocessing
 from retinanet.utils import total_pixel_size
 
 
@@ -43,30 +42,29 @@ class conv1x1(nn.Module):
 # # node_feauter은 forward의 input으로 들어감
 
 class FUB(nn.Module):
-    def __init__(self, channels, r, node_size):
+    def __init__(self, channels, node_size):
         super(FUB, self).__init__()
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
-        self.node_num = node_size
        # self.make_score = MS_CAM(channels, r)
-        self.w = nn.Parameter(torch.Tensor(node_size, 5))
-        self.cl_0 = conv1x1(2 * 256, 256)
-        self.cl_1 = conv1x1(2 * 256, 256)
-        self.cl_2 = conv1x1(2 * 256, 256)
-        self.cl_3 = conv1x1(2 * 256, 256)
-        self.cl_4 = conv1x1(2 * 256, 256)
+        self.w = nn.Parameter(torch.Tensor(node_size, node_size))
+        self.cl_0 = conv1x1(2 * channels, channels)
+        self.cl_1 = conv1x1(2 * channels, channels)
+        self.cl_2 = conv1x1(2 * channels, channels)
+        self.cl_3 = conv1x1(2 * channels, channels)
+        self.cl_4 = conv1x1(2 * channels, channels)
+        self.conv_dic = {0:self.cl_0, 1:self.cl_1, 2:self.cl_2, 3:self.cl_3, 4 :self.cl_4}
         self.sigmoid = nn.Sigmoid()
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
         edge_list = torch.zeros(pixels, self.node_num, self.node_num)
-        conv_dic = {0:self.cl_0, 1:self.cl_1, 2:self.cl_2, 3:self.cl_3, 4 :self.cl_4}
 
         for i, node_i in enumerate(Node_feats):
             for j, node_j in enumerate(Node_feats):
                 x_add = node_i + node_j  # elementwise add
                 c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
-                target = conv_dic[i](c_cat)
+                target = self.conv_dic[i](c_cat)
                 distance = (node_j - target)
                 score  = distance.reshape(1, -1)
                 edge_list[:,i,j] = score
@@ -140,7 +138,7 @@ class MS_CAM(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, node_i,node_j):
-        x_ = torch.cat((node_i,node_j),dim=1)
+        x_ = torch.cat([node_i,node_j],dim=1)
         x = self.compound(x_)
         xl = self.local_att(x)
         xg = self.global_att(x)
@@ -150,20 +148,19 @@ class MS_CAM(nn.Module):
         return refined
 
 class RFC(nn.Module):
-    def __init__(self, feat_size):
+    def __init__(self, channels,r=2):
         super(RFC, self).__init__()
-        self.rf_0 = MS_CAM(256,2)
-        self.rf_1 = MS_CAM(256,2)
-        self.rf_2 = MS_CAM(256,2)
-        self.rf_3 = MS_CAM(256,2)
-        self.rf_4 = MS_CAM(256,2)
-
+        self.rf_0 = MS_CAM(channels,r)
+        self.rf_1 = MS_CAM(channels,r)
+        self.rf_2 = MS_CAM(channels,r)
+        self.rf_3 = MS_CAM(channels,r)
+        self.rf_4 = MS_CAM(channels,r)
+        self.rf_dic = {0: self.rf_0, 1: self.rf_1, 2: self.rf_2, 3: self.rf_3, 4: self.rf_4}
     def forward(self, origin, h):
         result_feat = []
-        rf_dic = {0:self.rf_0, 1:self.rf_1, 2:self.rf_2, 3:self.rf_3, 4 :self.rf_4}
         i = 0
         for origin_feat, updated_feat in zip(origin, h):
-            refined = rf_dic[i](h,origin)
+            refined = self.rf_dic[i](h,origin)
             result_feat.append(refined)
             i = i+1
         return result_feat
