@@ -126,7 +126,7 @@ class MS_CAM(nn.Module):
     def __init__(self, channels=64, r=2):
         super(MS_CAM, self).__init__()
         self.inter_channels = int(channels // r)
-        self.bs_c = int(self.channels//3) # 256
+        self.bs_c = int(channels//3) # 256
         self.local_att = nn.Sequential(
             nn.Conv2d(channels, self.inter_channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(self.inter_channels),

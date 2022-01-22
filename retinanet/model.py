@@ -16,6 +16,7 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
+
 class Graph_FPN(nn.Module):
     def __init__(self, feat_size): #  [512, 1024, 2048] 순으로 되어있을거임
         super(Graph_FPN, self).__init__()

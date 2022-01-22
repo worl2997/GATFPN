@@ -71,7 +71,8 @@ def main(args=None):
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
     use_gpu = True
-    # retinanet = torch.load(parser.checkpoints)
+    if parser.checkpoints:
+        retinanet = torch.load(parser.checkpoints)
 
     if use_gpu:
         if torch.cuda.is_available():
@@ -90,13 +91,6 @@ def main(args=None):
 
     loss_hist = collections.deque(maxlen=500)
 
-    #
-    # if parser.checkpoints:
-    #     checkpoint_ = torch.load(parser.checkpoints)
-    #     retinanet.load_state_dict(checkpoint_['model_state_dict'])
-    #     optimizer.load_state_dict(checkpoint_['optimizer_state_dict'])
-    #     print('checkpoint load complete!!')
-
     retinanet.train()
     retinanet.module.freeze_bn()
 
@@ -106,7 +100,6 @@ def main(args=None):
 
         retinanet.train()
         retinanet.module.freeze_bn()
-
         epoch_loss = []
 
         for iter_num, data in enumerate(dataloader_train):
@@ -157,7 +150,7 @@ def main(args=None):
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, 'weights/new_weight_{}.pt'.format(epoch_num))
+        torch.save(retinanet.module, 'weights/new_weight_{}.pt'.format(epoch_num+1))
         # torch.save({
         #     'model_state_dict': retinanet.state_dict(),
         #     'optimizer_state_dict': optimizer.state_dict(),
