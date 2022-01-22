@@ -98,18 +98,14 @@ class GCN_FPN(nn.Module):
     def __init__(self,
                  in_channels,  # 256
                  num_levels,  # 5
-                 refine_level=2,  # 어떤 레벨을 기준으로 refine 할건지..?
+                 refine_level=2,
+                 r= 4,
                  conv_cfg=None,
                  norm_cfg=None):
         super(GCN_FPN, self).__init__()
+        assert 0 <= refine_level < num_levels
 
-        self.in_channels = in_channels
-        self.num_levels = num_levels
-        self.conv_cfg = conv_cfg
-        self.norm_cfg = norm_cfg
-        self.refine_level = refine_level
-        self.r = 2
-        assert 0 <= self.refine_level < self.num_levels
+
         self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
         self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
 
@@ -265,7 +261,7 @@ class ResNet(nn.Module):
             raise ValueError(f"Block type {block} not understood")
 
         self.Node_feats = Nodefeats_make(fpn_channel_sizes)
-        self.GCN_FPN = GCN_FPN(256,5,2) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
+        self.GCN_FPN = GCN_FPN(in_channels=256,num_levels=5,refine_level=2,r=4) # 백본으로 부터 나온 feature map들의 채널사이즈를 입력으로 받아서 node_feature를 생성하는 부분
 
         self.regressionModel = RegressionModel(256) # 256 차원이라..
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
