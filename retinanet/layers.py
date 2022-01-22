@@ -35,17 +35,12 @@ class conv1x1(nn.Module):
         return self.conv1(x)
 
 
-
-
-# # node_feauter은 forward의 input으로 들어감
-# GCN 기반으로 이미지 feature map을 업데이트 하는 부분
-# # node_feauter은 forward의 input으로 들어감
-
 class FUB(nn.Module):
     def __init__(self, channels, node_size):
         super(FUB, self).__init__()
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
        # self.make_score = MS_CAM(channels, r)
+        self.node_num = node_size
         self.w = nn.Parameter(torch.Tensor(node_size, node_size))
         self.cl_0 = conv1x1(2 * channels, channels)
         self.cl_1 = conv1x1(2 * channels, channels)
@@ -68,8 +63,7 @@ class FUB(nn.Module):
                 distance = (node_j - target)
                 score  = distance.reshape(1, -1)
                 edge_list[:,i,j] = score
-        out = edge_list * self.w
-        return out
+        return edge_list
 
     # graph 와 node feature matrix 반환
     def make_node_matrix(self, node_feats,pixels):
@@ -84,7 +78,8 @@ class FUB(nn.Module):
     def normalize_edge(self, input, type, t):
         # pruning -> Normalize (softmax)
         edge = self.sigmoid(input)
-        out = torch.where(edge > t, edge, torch.zeros(size=edge.size()))
+        k = torch.zeros(size=edge.size()).to(torch.cuda.current_device())
+        out = torch.where(edge > t, edge, k )
         out_= F.normalize(out, p=type, dim=2) # F.softmax(out, dim=2)
         return out_
 
@@ -99,16 +94,16 @@ class FUB(nn.Module):
         return out
 
     def forward(self, x):
-        node_feats = x  # list form으로 구성되어있음 [re_c1,.., re_c2] 5개의 피쳐맵들 존재
+        node_feats = x
         pixels = total_pixel_size(node_feats[0])
-        edge_matrix = self.make_edge_matirx(node_feats,pixels)
+        edge_matrix = self.make_edge_matirx(node_feats,pixels).to(torch.cuda.current_device())
+        new_edge = edge_matrix * self.w
         node_feats_list = self.make_node_matrix(node_feats,pixels)
         node_feats_matrix = node_feats_list.to(torch.cuda.current_device())
-
-        # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
-        normalized_edge = self.normalize_edge(edge_matrix, 2, 0.3).to(torch.cuda.current_device())
+        normalized_edge = self.normalize_edge(new_edge, 2, 0.3).to(torch.cuda.current_device())
         h = self.feat_fusion(normalized_edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
+
         return out
 
 
@@ -160,7 +155,7 @@ class RFC(nn.Module):
         result_feat = []
         i = 0
         for origin_feat, updated_feat in zip(origin, h):
-            refined = self.rf_dic[i](h,origin)
+            refined = self.rf_dic[i](updated_feat,origin_feat)
             result_feat.append(refined)
             i = i+1
         return result_feat

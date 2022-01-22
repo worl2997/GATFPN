@@ -34,25 +34,25 @@ class GCN_FPN(nn.Module):
                  r= 4):
         super(GCN_FPN, self).__init__()
         assert 0 <= refine_level < num_levels
-
+        self.refine_level = refine_level
+        self.num_levels = num_levels
         # forward 에서 input을 넣을때는 c6,c5,c4,c3 순으로 넣어주어야함
         self.n1_make = add_conv(512, in_channels, 1,1, leaky=False)
         self.n2_make = add_conv(1024, in_channels, 1,1, leaky=False)
         self.n3_make = add_conv(2048, in_channels, 1,1, leaky=False)
-        self.n4_make = add_conv(2048, in_channels, 3, 2, leaky=False),
+        self.n4_make = add_conv(2048, in_channels, 3, 2, leaky=False)
         self.n5_make = add_conv(in_channels, in_channels, 3, 2, leaky=False)
         self.refine =  FUB(in_channels, num_levels)  # forward input -> resize node list
         self.RFC = RFC(in_channels,r)  # forward input -> updated feature, origin_feature
 
     def forward(self, origin_feat):
         # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
-
-        n4 = self.n4_make(origin_feat[2])
-        n5 = self.n5_make(n4)
-
         n1 = self.n1_make(origin_feat[0])
         n2 = self.n2_make(origin_feat[1])
         n3 = self.n3_make(origin_feat[-1])
+
+        n4 = self.n4_make(origin_feat[2])
+        n5 = self.n5_make(n4)
 
         node_feat = [n1,n2,n3,n4,n5]
         gather_feat = []
@@ -66,7 +66,6 @@ class GCN_FPN(nn.Module):
             gather_feat.append(gathered)
 
         if self.refine is not None:
-            print('FUB!!!!')
             updated_feature = self.refine(gather_feat)  # input : Gather feature
 
         # step 3 :scatter refined features to multi-levels by a residual path
@@ -78,9 +77,7 @@ class GCN_FPN(nn.Module):
             else:
                 resized_back_feats = F.adaptive_max_pool2d(updated_feature[i], output_size=out_size)
             resized_back_feat.append(resized_back_feats)
-
         outs =self.RFC(resized_back_feat,node_feat)
-
         return outs
 
 
