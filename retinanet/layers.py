@@ -48,17 +48,18 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
        # self.make_score = MS_CAM(channels, r)
-        self.w = nn.Parameter(torch.Tensor(5, 1))
+        self.w = nn.Parameter(torch.Tensor(node_size, 5))
         self.cl_0 = conv1x1(2 * 256, 256)
         self.cl_1 = conv1x1(2 * 256, 256)
         self.cl_2 = conv1x1(2 * 256, 256)
         self.cl_3 = conv1x1(2 * 256, 256)
         self.cl_4 = conv1x1(2 * 256, 256)
+        self.sigmoid = nn.Sigmoid()
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
-        edge_list = torch.zeros(pixels, self.node_num, self.node_num).to(torch.cuda.current_device())
+        edge_list = torch.zeros(pixels, self.node_num, self.node_num)
         conv_dic = {0:self.cl_0, 1:self.cl_1, 2:self.cl_2, 3:self.cl_3, 4 :self.cl_4}
 
         for i, node_i in enumerate(Node_feats):
@@ -66,33 +67,27 @@ class FUB(nn.Module):
                 x_add = node_i + node_j  # elementwise add
                 c_cat = torch.cat([node_j, x_add], dim=1)  # 이거는 C x H x W 차원일 기준으로 하것
                 target = conv_dic[i](c_cat)
-                distance = ((node_j - target).abs())
+                distance = (node_j - target)
                 score  = distance.reshape(1, -1)
                 edge_list[:,i,j] = score
-
-        return edge_list
+        out = edge_list * self.w
+        return out
 
     # graph 와 node feature matrix 반환
     def make_node_matrix(self, node_feats,pixels):
         # 여기에 그래프 구성 코드를 집어넣으면 됨
         init_matrix = torch.Tensor(self.node_num, pixels)
-
         for i, node in enumerate(node_feats):
             init_matrix[i] = node.reshape(1, -1)
-
         node_feat = init_matrix.T
         node_feature_matirx = node_feat.unsqueeze(-1)
         return node_feature_matirx
 
     def normalize_edge(self, input, type, t):
         # pruning -> Normalize (softmax)
-        out = torch.where(input > t, input, torch.zeros(size=input.size()))
-        out_ = F.softmax(out, dim=2)  #F.normalize(out, p=type, dim=2)
-
-        # Normalize -> pruning
-        # out = F.softmax(input, dim=2)
-        # out_ = torch.where(out > t, out, torch.zeros(size=input.size()))
-
+        edge = self.sigmoid(input)
+        out = torch.where(edge > t, edge, torch.zeros(size=edge.size()))
+        out_= F.normalize(out, p=type, dim=2) # F.softmax(out, dim=2)
         return out_
 
     def feat_fusion(self, edge, node):
@@ -114,7 +109,6 @@ class FUB(nn.Module):
 
         # 노말라이즈가 필요한지 판단하고 필요하다면 아래 모듈 구현해서 추가하기
         normalized_edge = self.normalize_edge(edge_matrix, 2, 0.3).to(torch.cuda.current_device())
-
         h = self.feat_fusion(normalized_edge, node_feats_matrix)
         out = self.resize_back(node_feats[0].shape,h)
         return out
@@ -125,7 +119,7 @@ class MS_CAM(nn.Module):
     def __init__(self, channels=256, r=2):
         super(MS_CAM, self).__init__()
         inter_channels = int(channels // r)
-
+        self.compound = add_conv(channels * 2, channels, 1, 1, leaky=False)
         self.local_att = nn.Sequential(
             nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(inter_channels),
@@ -145,7 +139,9 @@ class MS_CAM(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x):
+    def forward(self, node_i,node_j):
+        x_ = torch.cat((node_i,node_j),dim=1)
+        x = self.compound(x_)
         xl = self.local_att(x)
         xg = self.global_att(x)
         xlg = xl + xg
@@ -156,37 +152,6 @@ class MS_CAM(nn.Module):
 class RFC(nn.Module):
     def __init__(self, feat_size):
         super(RFC, self).__init__()
-
-        self.rfc_0  = nn.Sequential(
-            nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0,bias=False),
-            nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(feat_size),
-            nn.ReLU(inplace=True),
-        )
-        self.rfc_1 = nn.Sequential(
-            nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(feat_size),
-            nn.ReLU(inplace=True),
-        )
-        self.rfc_2 = nn.Sequential(
-            nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(feat_size),
-            nn.ReLU(inplace=True),
-        )
-        self.rfc_3 = nn.Sequential(
-            nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(feat_size),
-            nn.ReLU(inplace=True),
-        )
-        self.rfc_4 = nn.Sequential(
-            nn.Conv2d(feat_size * 2, feat_size, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Conv2d(feat_size, feat_size, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(feat_size),
-            nn.ReLU(inplace=True),
-        )
         self.rf_0 = MS_CAM(256,2)
         self.rf_1 = MS_CAM(256,2)
         self.rf_2 = MS_CAM(256,2)
@@ -195,14 +160,10 @@ class RFC(nn.Module):
 
     def forward(self, origin, h):
         result_feat = []
-        rfc_dic = {0:self.rfc_0, 1:self.rfc_1, 2:self.rfc_2, 3:self.rfc_3, 4 :self.rfc_4}
         rf_dic = {0:self.rf_0, 1:self.rf_1, 2:self.rf_2, 3:self.rf_3, 4 :self.rf_4}
         i = 0
         for origin_feat, updated_feat in zip(origin, h):
-            feat = torch.cat([origin_feat, updated_feat], dim=1)
-            #rfc = rfc_dic[i]
-            out = rfc_dic[i](feat)
-            refined = rf_dic[i](out)
+            refined = rf_dic[i](h,origin)
             result_feat.append(refined)
             i = i+1
         return result_feat

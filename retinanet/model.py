@@ -20,74 +20,6 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
-class MS_CAM(nn.Module):
-
-    def __init__(self, channels=256, r=2):
-        super(MS_CAM, self).__init__()
-        inter_channels = int(channels // r)
-
-        self.local_att = nn.Sequential(
-            nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(inter_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(channels),
-        )
-
-        self.global_att = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(inter_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(channels),
-        )
-
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        xl = self.local_att(x)
-        xg = self.global_att(x)
-        xlg = xl + xg
-        wei = self.sigmoid(xlg)
-        refined  = x * wei
-        return refined
-
-class Nodefeats_make(nn.Module):
-    def __init__(self, fpn_channels):
-        super(Nodefeats_make, self).__init__()
-        self.fpn_c = fpn_channels # [256, 512, 1024, 2048] # 레벨별 채널 수
-        self.num_backbone_feats = len(self.fpn_c)
-        self.target_size = 256
-
-        self.make_C5_ = self.make_C5(self.fpn_c[-1],self.target_size) # C4 -> C5
-        self.make_C6_ = nn.Conv2d(self.target_size, self.target_size,kernel_size=3, stride=2, padding=1) # C5 -> C6
-        self.make_C1 = nn.Conv2d(in_channels=self.fpn_c[0], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C2 = nn.Conv2d(in_channels=self.fpn_c[1], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C3 = nn.Conv2d(in_channels=self.fpn_c[2], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-        self.make_C4 = nn.Conv2d(in_channels=self.fpn_c[3], out_channels=self.target_size, kernel_size=1, stride=1, padding=0)
-
-    def make_C5(self,in_ch, out_ch):
-        stage = nn.Sequential()
-        stage.add_module('conv1', nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, stride=1, padding=0))# 1x1 channel resize
-        stage.add_module('conv2', nn.Conv2d(out_ch, out_ch,kernel_size=3, stride=2 , padding=1))  # 3x3 conv 2 stride
-        return stage
-
-
-    def forward(self, inputs):
-        C1, C2, C3, C4 = inputs
-        # C1 ~ C6 : original feature
-        C5 = self.make_C5_(C4)
-        C6 = self.make_C6_(C5)
-        #C1 = self.make_C1(C1)
-        C2 = self.make_C2(C2)
-        C3 = self.make_C3(C3)
-        C4 = self.make_C4(C4)
-
-        return [C2,C3,C4,C5,C6]
-       #  채널사이즈만 256으로 모두 맞춰줌
-
-
 '''
 1.channel_resize-> 256 
 2.resize to intermediate feature scale 
@@ -99,49 +31,55 @@ class GCN_FPN(nn.Module):
                  in_channels,  # 256
                  num_levels,  # 5
                  refine_level=2,
-                 r= 4,
-                 conv_cfg=None,
-                 norm_cfg=None):
+                 r= 4):
         super(GCN_FPN, self).__init__()
         assert 0 <= refine_level < num_levels
 
+        # forward 에서 input을 넣을때는 c6,c5,c4,c3 순으로 넣어주어야함
+        self.n1_make = add_conv(512, in_channels, 1,1, leaky=False)
+        self.n2_make = add_conv(1024, in_channels, 1,1, leaky=False)
+        self.n3_make = add_conv(2048, in_channels, 1,1, leaky=False)
+        self.n4_make = nn.add_conv(2048, in_channels, 3, 2, leaky=False),
+        self.n5_make = nn.add_conv(in_channels, in_channels, 3, 2, leaky=False)
 
-        self.refine =  FUB(self.in_channels, self.r, self.num_levels)  # forward input -> resize node list
+        self.refine =  FUB(in_channels, self.r, num_levels)  # forward input -> resize node list
         self.RFC = RFC(self.in_channels)  # forward input -> updated feature, origin_feature
 
-    def forward(self, inputs):
+    def forward(self, origin_feat):
         # step 1. backbone으로 부터 받은 multi-level feature들의 channel을 resize해서 통합
-        feats = []
-        gather_size = inputs[self.refine_level].size()[2:]  # (뒤에 hxw 사이즈 반납)
+        n1 = self.n1_make(origin_feat[0])
+        n2 = self.n2_make(origin_feat[1])
+        n3 = self.n3_make(origin_feat[-1])
+        n4 = self.n4_make(origin_feat[-1])
+        n5 = self.n5_make(n4)
+        node_feat = [n1,n2,n3,n4,n5]
+        gather_feat = []
+
+        gather_size = node_feat[self.refine_level].size()[2:]  # (뒤에 hxw 사이즈 반납)
         # 피쳐들의 사이즈를 특정 기준으로 모두 통일
         for i in range(self.num_levels):
             if i < self.refine_level:
-                gathered = F.adaptive_max_pool2d(inputs[i], output_size=gather_size)
+                gathered = F.adaptive_max_pool2d(node_feat[i], output_size=gather_size)
             else:
-                #gathered = nn.Upsample(inputs[i], size=tuple(gather_size), mode='nearest')
-                gathered = F.interpolate(inputs[i], size=gather_size, mode='nearest')
-            feats.append(gathered)
-
+                gathered = F.interpolate(node_feat[i], size=gather_size, mode='nearest')
+            gather_feat.append(gathered)
 
         if self.refine is not None:
-            updated_feature = self.refine(feats)  # input : Gather feature
-            enhanced_feat = self.RFC(feats, updated_feature)
+            updated_feature = self.refine(gather_feat)  # input : Gather feature
 
         # step 3 :scatter refined features to multi-levels by a residual path
-        outs = []
+        resized_back_feat = []
         for i in range(self.num_levels):
-            out_size = inputs[i].size()[2:]  # 해당하는 원래 original size
-
+            out_size = node_feat[i].size()[2:]  # 해당하는 원래 original size
             if i < self.refine_level:
-                # 아래 두개의 feats를 enhanced_feat으로 바꾸어주기
-                #residual = nn.Upsample(enhanced_feat[i], size=tuple(out_size), mode='nearest')
-                resized_back_feats = F.interpolate(enhanced_feat[i], size=out_size, mode='nearest')
+                resized_back_feats = F.interpolate(updated_feature[i], size=out_size, mode='nearest')
             else:
-                resized_back_feats = F.adaptive_max_pool2d(enhanced_feat[i], output_size=out_size)
-            outs.append(resized_back_feats)
+                resized_back_feats = F.adaptive_max_pool2d(updated_feature[i], output_size=out_size)
+            resized_back_feat.append(resized_back_feats)
 
+        outs =self.RFC(resized_back_feat,node_feat)
 
-        return updated_feature
+        return outs
 
 
 
