@@ -47,6 +47,7 @@ def add_conv(in_ch, out_ch, ksize, stride, leaky=True):
     return stage
 
 
+
 class conv1x1(nn.Module):
     def __init__(self, in_feat, out_feat):
         super(conv1x1, self).__init__()
@@ -118,7 +119,6 @@ class graph_fusion(nn.Module):
             lev_2_res = self.resize_level_2(c_3)
             out = self.FUB_level_2([lev_0_res, lev_1_res, lev_2_res])
             # out = RFC_0(c_3,out)
-
         return out
 
 class MS_CAM(nn.Module):
@@ -277,15 +277,12 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         residual = x
-
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
-
         out = self.conv2(out)
         out = self.bn2(out)
         out = self.relu(out)
-
         out = self.conv3(out)
         out = self.bn3(out)
 
