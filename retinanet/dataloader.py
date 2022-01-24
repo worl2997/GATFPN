@@ -55,6 +55,7 @@ class CocoDataset(Dataset):
         # also load the reverse (label -> name)
         self.labels = {}
         for key, value in self.classes.items():
+            # revised point1 (value -> value +1)
             self.labels[value] = key
 
     def __len__(self):
@@ -119,7 +120,8 @@ class CocoDataset(Dataset):
         return float(image['width']) / float(image['height'])
 
     def num_classes(self):
-        return 80
+        # revised point ! 80 ->21
+        return 20
 
 
 class CSVDataset(Dataset):
@@ -452,7 +454,6 @@ class AspectRatioBasedSampler(Sampler):
         # determine the order of the images
         order = list(range(len(self.data_source)))
         order.sort(key=lambda x: self.data_source.image_aspect_ratio(x))
-
         # divide into groups, one group = one batch
         return [[order[x % len(order)] for x in range(i, i + self.batch_size)] for i in
                 range(0, len(order), self.batch_size)]
