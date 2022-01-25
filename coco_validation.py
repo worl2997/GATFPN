@@ -25,7 +25,7 @@ def main(args=None):
     # Create the model
     #retinanet = model.resnet50(num_classes=dataset_val.num_classes(), pretrained=True)
 
-    retinanet = torch.load(parser.model_path)
+    # retinanet = torch.load(parser.model_path)
     use_gpu = True
 
     if use_gpu:

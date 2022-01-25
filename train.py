@@ -25,14 +25,15 @@ def main(args=None):
 
     parser.add_argument('--dataset', help='Dataset type, must be one of csv or coco.')
     parser.add_argument('--coco_path', help='Path to COCO directory')
+    parser.add_argument('--voc_path', help='Path to COCO directory')
+
     parser.add_argument('--csv_train', help='Path to file containing training annotations (see readme)')
     parser.add_argument('--csv_classes', help='Path to file containing class list (see readme)')
     parser.add_argument('--csv_val', help='Path to file containing validation annotations (optional, see readme)')
 
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument('--epochs', help='Number of epochs', type=int, default=100)
-    parser.add_argument('--checkpoints', help='path of check point', type=str, default=None)
-
+    parser.add_argument('--checkpoints', help='model checkpoints path', type=str)
     parser = parser.parse_args(args)
 
     # Create the data loaders
@@ -45,16 +46,30 @@ def main(args=None):
                                     transform=transforms.Compose([Normalizer(), Augmenter(), Resizer()]))
         dataset_val = CocoDataset(parser.coco_path, set_name='val2017',
                                   transform=transforms.Compose([Normalizer(), Resizer()]))
+        sampler = AspectRatioBasedSampler(dataset_train, batch_size=3, drop_last=False)
+        dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
+
+        if dataset_val is not None:
+            sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=3, drop_last=False)
+            dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
+
+    elif parser.dataset == 'voc':
+        if parser.voc_path is None:
+            raise ValueError('Must provide --voc_path when training on voc2012,')
+
+        dataset_train = CocoDataset(parser.voc_path, set_name='train2017',
+                                    transform=transforms.Compose([Normalizer(), Augmenter(), Resizer()]))
+        dataset_val = CocoDataset(parser.voc_path, set_name='val2017',
+                                  transform=transforms.Compose([Normalizer(), Resizer()]))
+        sampler = AspectRatioBasedSampler(dataset_train, batch_size=6, drop_last=False)
+        dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
+
+        if dataset_val is not None:
+            sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=3, drop_last=False)
+            dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
 
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
-
-    sampler = AspectRatioBasedSampler(dataset_train, batch_size=2, drop_last=False)
-    dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
-
-    if dataset_val is not None:
-        sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=2, drop_last=False)
-        dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
 
     # Create the model
     if parser.depth == 18:

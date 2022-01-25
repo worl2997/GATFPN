@@ -24,6 +24,32 @@ class upsample(nn.Module):
     def forward(self, input):
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
+    def extra_repr(self):import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from retinanet.utils import total_pixel_size
+
+
+def conv3x3(in_planes, out_planes, stride=1):
+    """3x3 convolution with padding"""
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                     padding=1, bias=False)
+
+class upsample(nn.Module):
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+
+    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
+        super(upsample, self).__init__()
+        self.name = type(self).__name__
+        self.size = size
+        self.scale_factor = scale_factor
+        self.mode = mode
+        self.align_corners = align_corners
+
+    def forward(self, input):
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+
     def extra_repr(self):
         if self.scale_factor is not None:
             info = 'scale_factor=' + str(self.scale_factor)
@@ -57,10 +83,8 @@ class conv1x1(nn.Module):
 
     def forward(self, x):
         return self.conv1(x)
-'''
-#p6 자체를 prediction하지만 
-#나머지 FUB블록에 p6정보를 전달 
-'''
+
+
 class graph_fusion(nn.Module):
     def __init__(self, level):
         super(graph_fusion, self).__init__()
@@ -69,28 +93,25 @@ class graph_fusion(nn.Module):
         self.inter_dim = 256
 
         if level == 0:  # high-level
-            self.p6_resize =upsample(scale_factor=2, mode='nearest')
             self.resize_level_0 = add_conv(2048, self.inter_dim, 1, 1, leaky=False)
             self.resize_level_1 = add_conv(1024, self.inter_dim, 3, 2, leaky=False)  # 3x3 conv 한번
             self.resize_level_2 = nn.Sequential(  # max-pool ->3x3conv
                 nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
                 add_conv(512, self.inter_dim, 3, 2, leaky=False),
             )
-            self.FUB_level_0 = FUB(256, r=4, node_size=4, level=0)
+            self.FUB_level_0 = FUB(256, r=4, node_size=3, level=0)
 
 
         elif level == 1:  # middle-level
-            self.p6_resize =upsample(scale_factor=4, mode='nearest')
             self.resize_level_0 = nn.Sequential(
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False),  # stride_level_0 -> 차원수 줄이고 크기 한번 확장
                 upsample(scale_factor=2, mode='nearest'),
             )
             self.resize_level_1 = add_conv(1024, self.inter_dim, 1, 1, leaky=False)  # 3x3 conv 한번
             self.resize_level_2 = add_conv(512, self.inter_dim, 3, 2, leaky=False)  # 3x3conv 한번
-            self.FUB_level_1 = FUB(256, r=4, node_size=4, level=1)
+            self.FUB_level_1 = FUB(256, r=4, node_size=3, level=1)
 
         elif level == 2:  # low-level
-            self.p6_resize =upsample(scale_factor=8, mode='nearest')
             self.resize_level_0 = nn.Sequential(
                 add_conv(2048, self.inter_dim, 1, 1, leaky=False),  # 채널 줄이고 scale factor - 4
                 upsample(scale_factor=4, mode='nearest'),
@@ -100,33 +121,29 @@ class graph_fusion(nn.Module):
                 upsample(scale_factor=2, mode='nearest'),
             )
             self.resize_level_2 = add_conv(512, self.inter_dim, 1, 1, leaky=False)  # 3x3conv 한번
-            self.FUB_level_2 = FUB(256, r=4, node_size=4, level=2)
+            self.FUB_level_2 = FUB(256, r=4, node_size=3, level=2)
 
-
-    def forward(self, c_3, c_4, c_5, p6):  # input : [512, 1024, 2048]
+    def forward(self, c_3, c_4, c_5):  # input : [512, 1024, 2048]
         if self.level == 0:  # 최고 차원의 피쳐 (피라미드 꼭대기)
-            resized_p6 = self.p6_resize(p6)
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_0([resized_p6, lev_0_res, lev_1_res, lev_2_res]) # level_0의 사이즈에 모두 맞춰줌
+            out = self.FUB_level_0([lev_0_res, lev_1_res, lev_2_res]) # level_0의 사이즈에 모두 맞춰줌
             # leve_0 -> 작은 피쳐 , level_2 -> 큰피
             # out = RFC_0(c_5,out)
 
         elif self.level == 1:  # 어쩃든 피쳐 채널크기는 모두 256으로 맞춤
-            resized_p6 = self.p6_resize(p6)
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_1([resized_p6, lev_0_res, lev_1_res, lev_2_res])
+            out = self.FUB_level_1([lev_0_res, lev_1_res, lev_2_res])
             # out = RFC_0(c_4,out)
 
         elif self.level == 2:
-            resized_p6 = self.p6_resize(p6)
             lev_0_res = self.resize_level_0(c_5)
             lev_1_res = self.resize_level_1(c_4)
             lev_2_res = self.resize_level_2(c_3)
-            out = self.FUB_level_2([resized_p6, lev_0_res, lev_1_res, lev_2_res])
+            out = self.FUB_level_2([lev_0_res, lev_1_res, lev_2_res])
             # out = RFC_0(c_3,out)
         return out
 
@@ -153,17 +170,16 @@ class MS_CAM(nn.Module):
         )
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x1,x2,x3, x4):
-        x = torch.cat((x1,x2,x3,x4),1)
+    def forward(self, x1,x2,x3):
+        x = torch.cat((x1,x2,x3),1)
         xl = self.local_att(x)
         xg = self.global_att(x)
         xlg = xl + xg
         wei = self.sigmoid(xlg) # 256*3 x H x W
         x1_w = wei[:, 0:self.bs_c,:,:]
         x2_w = wei[:, self.bs_c:self.bs_c*2, :, :]
-        x3_w = wei[:, self.bs_c*2:self.bs_c*3, :, :]
-        x4_w = wei[:, self.bs_c*3:, :, :]
-        out = [x1_w.reshape(1,-1), x2_w.reshape(1,-1),x3_w.reshape(1,-1), x4_w.reshape(1,-1)]
+        x3_w = wei[:, self.bs_c*2:, :, :]
+        out = [x1_w.reshape(1,-1), x2_w.reshape(1,-1),x3_w.reshape(1,-1)]
         return out
 
 
@@ -174,13 +190,13 @@ class FUB(nn.Module):
         # 직접 해당 클래스 안에서 input_feature를 기반으로 그래프를 구현해야 함
         self.node_num = node_size
         self.level = level
-        self.mk_score = MS_CAM(channels*node_size, r)
+        self.mk_score = MS_CAM(channels*3, r)
 
     # 입력 받은 feature node  리스트를 기반으로 make_distance로 edge를 계산하고
     def make_edge_matirx(self, node_feats, pixels):
         Node_feats = node_feats
         edge_list = torch.zeros(pixels, 1, self.node_num)
-        att_score = self.mk_score(Node_feats[0],Node_feats[1],Node_feats[2],Node_feats[3])
+        att_score = self.mk_score(Node_feats[0],Node_feats[1],Node_feats[2])
         for i in range(len(Node_feats)):
             edge_list[:, 0, i] = att_score[i]
         weight = F.softmax(edge_list, dim=2)
@@ -190,8 +206,8 @@ class FUB(nn.Module):
         # 여기에 그래프 구성 코드를 집어넣으면 됨
         init_matrix = torch.Tensor(self.node_num, pixels)
         for i, node in enumerate(node_feats):
-            init_matrix[i] = node.reshape(1, -1)
-        node_feat = init_matrix.T
+            init_matrix[i] = node.contiguous().reshape(1, -1)
+        node_feat = init_matrix.T.contiguous()
         node_feature_matirx = node_feat.unsqueeze(-1)
         return node_feature_matirx
 
@@ -203,7 +219,7 @@ class FUB(nn.Module):
     def feat_fusion(self, edge, node):
         h = edge.matmul(node)  # mx1x5 * 5x1
         result = h.squeeze(-1)
-        out = result.T # 1xm size
+        out = result.T.contiguous() # 1xm size
         return out
 
     def resize_back(self,ori_s, h):
