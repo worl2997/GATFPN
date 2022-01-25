@@ -150,14 +150,14 @@ def main(args=None):
 
         scheduler.step(np.mean(epoch_loss))
 
-        torch.save(retinanet.module, 'weights/new_weight_{}.pt'.format(epoch_num+1))
+        torch.save(retinanet.module, 'brandnew/br_ver2_p6add_{}.pt'.format(epoch_num+1))
         # torch.save({
         #     'model_state_dict': retinanet.state_dict(),
         #     'optimizer_state_dict': optimizer.state_dict(),
         #     'loss': loss,
         # }, '{}_GCN_retinanet_{}.pt'.format(parser.dataset, epoch_num))
     retinanet.eval()
-    torch.save(retinanet, 'weights/new_weight.pt')
+    torch.save(retinanet, 'brandnew/br_ver2_p6add_final.pt')
 
 
 if __name__ == '__main__':
