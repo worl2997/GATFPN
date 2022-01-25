@@ -43,9 +43,9 @@ class Graph_FPN(nn.Module):
 
         # change this point with ms-cam
         refined_p6 = self.for_refine_p6(uf_0) + p6
-        refined_p6 = self.for_refine_p7(refined_p6) + p7
+        refined_p7 = self.for_refine_p7(refined_p6) + p7
 
-        out =[uf_2,uf_1,uf_0,refined_p6,refined_p6]
+        out =[uf_2,uf_1,uf_0,refined_p6,refined_p7]
 
         return out
 

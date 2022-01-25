@@ -12,6 +12,7 @@ from retinanet.dataloader import CocoDataset, CSVDataset, collater, Resizer, Asp
     Normalizer
 from torch.utils.data import DataLoader
 
+
 from retinanet import coco_eval
 from retinanet import csv_eval
 
@@ -102,7 +103,7 @@ def main(args=None):
 
     optimizer = optim.Adam(retinanet.parameters(), lr=1e-5)
 
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
 
     loss_hist = collections.deque(maxlen=500)
 
@@ -153,7 +154,7 @@ def main(args=None):
             except Exception as e:
                 print(e)
                 continue
-        if epoch_num % 1 ==0: # and epoch_num > 0:
+        if epoch_num % 2 ==0 and epoch_num > 0:
             if parser.dataset == 'coco':
 
                 print('Evaluating dataset')
