@@ -1,2 +1,2 @@
 # GATFPN-
-graph attention network based feature fusion method 
+Multi-scale feature fusion method based on Graph attention network
